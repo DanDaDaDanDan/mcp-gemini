@@ -30,6 +30,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { GeminiTextProvider } from "./providers/gemini-text.js";
 import { GeminiImageProvider } from "./providers/gemini-image.js";
+import { GeminiDeepResearchProvider } from "./providers/deep-research.js";
 import {
   isSupportedImageModel,
   SUPPORTED_IMAGE_MODELS,
@@ -39,16 +40,17 @@ import { logger } from "./logger.js";
 // Configuration from environment - fail fast if missing
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 if (!GEMINI_API_KEY) {
-  console.error(
-    "FATAL: GEMINI_API_KEY environment variable is required. " +
-      "Set it in your MCP server configuration or export it in your shell."
-  );
+  const errorMsg = "FATAL: GEMINI_API_KEY environment variable is required. " +
+    "Set it in your MCP server configuration or export it in your shell.";
+  logger.error(errorMsg);
+  console.error(errorMsg);  // Also to stderr for immediate visibility
   process.exit(1);
 }
 
 // Initialize providers eagerly at startup - fail fast
 const textProvider = new GeminiTextProvider(GEMINI_API_KEY);
 const imageProvider = new GeminiImageProvider(GEMINI_API_KEY);
+const deepResearchProvider = new GeminiDeepResearchProvider(GEMINI_API_KEY);
 
 // Create MCP server
 const server = new Server(
@@ -101,11 +103,16 @@ const TOOLS = [
           minimum: 0,
           maximum: 1,
         },
-        images: {
+        files: {
           type: "array",
           items: { type: "string" },
           description:
-            "File paths to images for multimodal input. Supports jpg, png, gif, webp, heic. Use for image analysis, OCR, visual Q&A.",
+            "File paths for multimodal input. Supports: " +
+            "Images (jpg, png, webp, heic, heif), " +
+            "Audio (wav, mp3, aiff, aac, ogg, flac - up to 9.5 hours), " +
+            "Video (mp4, mpeg, mov, avi, flv, webm, wmv, 3gp - up to 2 hours), " +
+            "Documents (pdf - up to 1000 pages), " +
+            "Text (txt, md, html, xml, css, js, ts, json, csv, rtf).",
         },
       },
       required: ["prompt"],
@@ -149,6 +156,32 @@ const TOOLS = [
     },
   },
   {
+    name: "deep_research",
+    description:
+      "Perform autonomous web research using Google's Deep Research agent. " +
+      "The agent searches the web, analyzes multiple sources, and produces comprehensive research reports. " +
+      "This is a long-running operation that typically takes 5-30 minutes to complete.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "The research question or topic to investigate. Be specific and detailed for best results.",
+        },
+        timeout_minutes: {
+          type: "number",
+          description:
+            "Maximum time to wait for research completion in minutes (default: 30, max: 60)",
+          default: 30,
+          minimum: 5,
+          maximum: 60,
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "list_models",
     description: "List all available Gemini models and their capabilities",
     inputSchema: {
@@ -188,6 +221,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       available: true,
     });
 
+    // Add deep research model
+    models.push({
+      ...deepResearchProvider.getModelInfo(),
+      available: true,
+    });
+
     return {
       content: [
         {
@@ -206,14 +245,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       thinking_level: thinkingLevel,
       max_tokens: maxTokens,
       temperature,
-      images,
+      files,
     } = args as {
       prompt: string;
       system_prompt?: string;
       thinking_level?: "low" | "high";
       max_tokens?: number;
       temperature?: number;
-      images?: string[];
+      files?: string[];
     };
 
     // Validate prompt
@@ -236,7 +275,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         thinkingLevel,
         maxTokens,
         temperature,
-        images,
+        files,
       });
 
       // Return successful result
@@ -351,6 +390,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     } catch (error: any) {
       const errorMessage = error.message || "Unknown error during image generation";
       logger.error("Image generation failed", { error: errorMessage });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  // Deep research tool
+  if (name === "deep_research") {
+    const { query, timeout_minutes: timeoutMinutes } = args as {
+      query: string;
+      timeout_minutes?: number;
+    };
+
+    // Validate query
+    if (!query || query.trim().length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: Query cannot be empty",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Convert timeout from minutes to milliseconds
+    const timeoutMs = (timeoutMinutes || 30) * 60 * 1000;
+
+    try {
+      logger.info("Starting deep research", { queryLength: query.length, timeoutMinutes: timeoutMinutes || 30 });
+
+      const result = await deepResearchProvider.research({
+        query,
+        timeoutMs,
+      });
+
+      // Return successful result
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.text,
+          },
+        ],
+        _meta: {
+          model: result.model,
+          interactionId: result.interactionId,
+          durationMs: result.durationMs,
+          durationMinutes: Math.round(result.durationMs / 1000 / 60 * 10) / 10,
+        },
+      };
+    } catch (error: any) {
+      const errorMessage = error.message || "Unknown error during deep research";
+      logger.error("Deep research failed", { error: errorMessage });
 
       return {
         content: [

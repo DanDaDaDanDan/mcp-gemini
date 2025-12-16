@@ -25,6 +25,7 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 | gemini-3-pro | `gemini-3-pro-preview` | Text/Thinking |
 | nano-banana | `gemini-2.5-flash-preview-image-generation` | Image (fast) |
 | nano-banana-pro | `gemini-2.0-flash-exp-image-generation` | Image (high-quality) |
+| deep-research | `deep-research-pro-preview-12-2025` | Research (async) |
 
 ## Thinking Configuration
 
@@ -56,26 +57,50 @@ src/
 ├── retry.ts              # Exponential backoff, timeout wrapper
 └── providers/
     ├── gemini-text.ts    # Gemini 3 Pro with thinking
-    └── gemini-image.ts   # Nano Banana / Pro image generation
+    ├── gemini-image.ts   # Nano Banana / Pro image generation
+    └── deep-research.ts  # Deep Research autonomous agent
 ```
 
 ## Multimodal Input
 
-Text generation supports image inputs via file paths:
+Text generation supports comprehensive multimodal input via file paths. All supported file types are defined in `SUPPORTED_MIME_TYPES` in `types.ts`.
+
+### Supported File Types
+
+| Category | Extensions | MIME Types | Limits |
+|----------|------------|------------|--------|
+| **Images** | jpg, jpeg, png, webp, heic, heif | image/* | Max 3,600 per request |
+| **Audio** | wav, mp3, aiff, aac, ogg, flac | audio/* | Up to 9.5 hours total |
+| **Video** | mp4, mpeg, mpg, mov, avi, flv, webm, wmv, 3gp | video/* | Up to 2 hours (default) or 6 hours (low res) |
+| **Documents** | pdf | application/pdf | Up to 1,000 pages, 50MB |
+| **Text** | txt, md, html, xml, css, js, ts, json, csv, rtf | text/*, application/json | Processed as plain text |
+
+**Not supported:** GIF, BMP, TIFF images are not supported by Gemini.
+
+### Size Limits
+
+- **Inline data**: Total request size < 20MB (use Files API for larger)
+- **Files API**: Up to 2GB per file, 20GB per project
+- **PDF**: Max 1,000 pages, ~258 tokens per page
+- **Video**: ~258 tokens per frame at 1 FPS + 32 tokens/sec audio
+
+### Usage
 
 ```typescript
-// In gemini-text.ts - images are read and base64 encoded
+// In gemini-text.ts - files are read and base64 encoded
 const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
-for (const imagePath of images) {
-  const mimeType = getMimeType(imagePath);  // jpg, png, gif, webp, heic, heif
-  const data = readFileSync(imagePath, { encoding: "base64" });
+for (const filePath of files) {
+  const mimeType = getMimeType(filePath);  // Uses SUPPORTED_MIME_TYPES lookup
+  const data = readFileSync(filePath, { encoding: "base64" });
   contents.push({ inlineData: { mimeType, data } });
 }
 contents.push({ text: textPrompt });
 ```
 
-Images are added before text (standard multimodal ordering). Fails fast if file doesn't exist.
+Files are added before text (standard multimodal ordering). Fails fast if:
+- File doesn't exist
+- File extension is not in SUPPORTED_MIME_TYPES
 
 ## Response Handling
 
@@ -102,6 +127,33 @@ for (const part of response.candidates[0].content.parts) {
 response.candidates[0].content.parts[].inlineData.data  // Base64 image
 response.candidates[0].content.parts[].inlineData.mimeType
 ```
+
+## Deep Research
+
+The Deep Research agent uses a REST API (not the SDK) for autonomous web research:
+
+```typescript
+// Start research - returns interaction ID
+POST /v1beta/interactions
+{
+  input: "research query",
+  agent: "deep-research-pro-preview-12-2025",
+  background: true,
+  agent_config: { thinking_summaries: "auto" }
+}
+
+// Poll for completion
+GET /v1beta/interactions/{interaction_id}
+// Returns: { status: "in_progress" | "completed" | "failed", outputs: [...] }
+```
+
+**Key points:**
+- Long-running: typically 5-30 minutes, max 60 minutes
+- Async polling: start task, poll until `status` is `completed` or `failed`
+- Output is in `response.outputs[].text`
+- Uses `x-goog-api-key` header for authentication (same API key)
+- File support: Experimental - requires File Search stores (not inline files)
+- Audio inputs are NOT supported for Deep Research
 
 ## Environment Variables
 

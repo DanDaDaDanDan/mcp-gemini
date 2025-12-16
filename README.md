@@ -5,6 +5,7 @@ MCP server for Claude Code providing access to Google's Gemini models:
 - **Gemini 3 Pro** - Text generation with thinking/reasoning capabilities (multimodal)
 - **Nano Banana** - Fast image generation (Gemini 2.5 Flash Image)
 - **Nano Banana Pro** - High-fidelity image generation (Gemini 3 Pro Image)
+- **Deep Research** - Autonomous web research agent
 
 ## Setup
 
@@ -22,8 +23,8 @@ npm install && npm run build
 ### 3. Add to Claude Code
 
 ```bash
-claude mcp add --transport stdio gemini \
-  --env GEMINI_API_KEY=your-api-key-here \
+claude mcp add -s user -t stdio mcp-gemini \
+  -e GEMINI_API_KEY=your-api-key-here \
   -- node /path/to/mcp-gemini/dist/index.js
 ```
 
@@ -32,7 +33,7 @@ Or manually add to your Claude Code MCP settings:
 ```json
 {
   "mcpServers": {
-    "gemini": {
+    "mcp-gemini": {
       "command": "node",
       "args": ["/path/to/mcp-gemini/dist/index.js"],
       "env": {
@@ -47,18 +48,25 @@ Or manually add to your Claude Code MCP settings:
 
 ### generate_text
 
-Generate text using Gemini 3 Pro with thinking capabilities. Supports multimodal input (images).
+Generate text using Gemini 3 Pro with thinking capabilities. Supports comprehensive multimodal input.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prompt` | string | ✓ | The prompt to send |
+| `prompt` | string | Yes | The prompt to send |
 | `system_prompt` | string | | System instructions |
 | `thinking_level` | `"low"` \| `"high"` | | Thinking depth (default: `"high"`) |
 | `max_tokens` | number | | Max output tokens (default: 65536) |
 | `temperature` | number | | 0-1 sampling temp (default: 0.7) |
-| `images` | string[] | | File paths to images for multimodal input |
+| `files` | string[] | | File paths for multimodal input |
 
-**Supported image formats:** jpg, jpeg, png, gif, webp, heic, heif
+**Supported file formats:**
+- **Images:** jpg, png, webp, heic, heif (max 3,600 per request)
+- **Audio:** wav, mp3, aiff, aac, ogg, flac (up to 9.5 hours)
+- **Video:** mp4, mpeg, mov, avi, flv, webm, wmv, 3gp (up to 2 hours)
+- **Documents:** pdf (up to 1,000 pages)
+- **Text:** txt, md, html, xml, css, js, ts, json, csv, rtf
+
+**Not supported:** GIF, BMP, TIFF
 
 **Example:**
 ```
@@ -67,7 +75,7 @@ Use generate_text to analyze this code with high thinking
 
 **Multimodal example:**
 ```
-Use generate_text with images=["/path/to/screenshot.png"] to describe what's in this image
+Use generate_text with files=["/path/to/document.pdf"] to summarize this document
 ```
 
 ### generate_image
@@ -76,8 +84,8 @@ Generate images using Nano Banana or Nano Banana Pro.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prompt` | string | ✓ | Image description |
-| `output_path` | string | ✓ | Where to save the image |
+| `prompt` | string | Yes | Image description |
+| `output_path` | string | Yes | Where to save the image |
 | `model` | `"nano-banana"` \| `"nano-banana-pro"` | | Model (default: `"nano-banana"`) |
 | `reference_images` | string[] | | Base64 images for editing/composition |
 | `aspect_ratio` | string | | e.g., `"16:9"`, `"1:1"` |
@@ -91,6 +99,22 @@ Generate images using Nano Banana or Nano Banana Pro.
 Use generate_image to create a sunset over mountains, save to /tmp/sunset.png
 ```
 
+### deep_research
+
+Perform autonomous web research using Google's Deep Research agent. Returns comprehensive research reports.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Research question or topic |
+| `timeout_minutes` | number | | Max wait time (default: 30, max: 60) |
+
+**Note:** This is a long-running operation that typically takes 5-30 minutes.
+
+**Example:**
+```
+Use deep_research to investigate recent developments in quantum computing
+```
+
 ### list_models
 
 List available models and their capabilities.
@@ -99,7 +123,7 @@ List available models and their capabilities.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | ✓ | - | Google AI API key |
+| `GEMINI_API_KEY` | Yes | - | Google AI API key |
 | `MCP_DEBUG` | | `true` | Debug logging; set to `"false"` to disable |
 | `MCP_LOG_DIR` | | `./logs` | Log directory; set to `"none"` to disable |
 
@@ -110,6 +134,7 @@ List available models and their capabilities.
 | gemini-3-pro | `gemini-3-pro-preview` | Text | Thinking/reasoning model (multimodal) |
 | nano-banana | `gemini-2.5-flash-preview-image-generation` | Image | Fast image generation |
 | nano-banana-pro | `gemini-2.0-flash-exp-image-generation` | Image | High-fidelity images |
+| deep-research | `deep-research-pro-preview-12-2025` | Research | Autonomous web research agent |
 
 **Note:** Uses `@google/genai` SDK (not the deprecated `@google/generative-ai`).
 

@@ -6,25 +6,25 @@
 
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type { TextGenerateOptions, GenerateResult, ModelInfo, TextProvider } from "../types.js";
-import { TEXT_MODEL_ID } from "../types.js";
+import { TEXT_MODEL_ID, SUPPORTED_MIME_TYPES } from "../types.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
 import { readFileSync, existsSync } from "fs";
 import { extname } from "path";
 
-// Map file extensions to MIME types for images
+/**
+ * Get MIME type for a file path. Throws if file type is not supported.
+ */
 function getMimeType(filePath: string): string {
   const ext = extname(filePath).toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-  };
-  return mimeTypes[ext] || "image/jpeg";
+  const mimeType = SUPPORTED_MIME_TYPES[ext];
+  if (!mimeType) {
+    const supportedExts = Object.keys(SUPPORTED_MIME_TYPES).join(", ");
+    throw new Error(
+      `Unsupported file type "${ext}". Supported types: ${supportedExts}`
+    );
+  }
+  return mimeType;
 }
 
 // Default timeout for generation requests (5 minutes)
@@ -48,7 +48,7 @@ export class GeminiTextProvider implements TextProvider {
       thinkingLevel = "high",
       maxTokens = 65536,
       temperature = 0.7,
-      images = [],
+      files = [],
     } = options;
     const startTime = Date.now();
 
@@ -64,21 +64,21 @@ export class GeminiTextProvider implements TextProvider {
       thinkingLevel,
       maxTokens,
       temperature,
-      imageCount: images.length,
+      fileCount: files.length,
     });
 
     // Build contents array for multimodal input
     const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
-    // Add images first if provided
-    for (const imagePath of images) {
-      if (!existsSync(imagePath)) {
-        throw new Error(`Image file not found: ${imagePath}`);
+    // Add files first if provided (images, audio, video, PDFs, text files)
+    for (const filePath of files) {
+      if (!existsSync(filePath)) {
+        throw new Error(`File not found: ${filePath}`);
       }
-      const mimeType = getMimeType(imagePath);
-      const data = readFileSync(imagePath, { encoding: "base64" });
+      const mimeType = getMimeType(filePath);
+      const data = readFileSync(filePath, { encoding: "base64" });
       contents.push({ inlineData: { mimeType, data } });
-      logger.debugLog("Added image to request", { imagePath, mimeType });
+      logger.debugLog("Added file to request", { filePath, mimeType });
     }
 
     // Add text prompt
