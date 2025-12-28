@@ -139,7 +139,10 @@ POST /v1beta/interactions
   input: "research query",
   agent: "deep-research-pro-preview-12-2025",
   background: true,
-  agent_config: { thinking_summaries: "auto" }
+  agent_config: {
+    type: "deep-research",        // REQUIRED - must specify agent type
+    thinking_summaries: "auto"    // Optional - enables progress updates
+  }
 }
 
 // Poll for completion

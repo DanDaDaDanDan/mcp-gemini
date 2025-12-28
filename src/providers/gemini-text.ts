@@ -100,6 +100,18 @@ export class GeminiTextProvider implements TextProvider {
       // Include thought summaries for transparency
       config.thinkingConfig.includeThoughts = true;
 
+      logger.debugLog("Text generation API request", {
+        model: TEXT_MODEL_ID,
+        config: {
+          maxOutputTokens: config.maxOutputTokens,
+          temperature: config.temperature,
+          thinkingLevel: config.thinkingConfig.thinkingLevel,
+          includeThoughts: config.thinkingConfig.includeThoughts,
+        },
+        contentsCount: contents.length,
+        fileTypes: files.map(f => extname(f).toLowerCase()),
+      });
+
       // Use retry wrapper for transient errors and timeout protection
       const response = await withRetry(
         () =>
@@ -117,6 +129,14 @@ export class GeminiTextProvider implements TextProvider {
           retryableErrors: ["RATE_LIMIT", "429", "503", "502", "ECONNRESET", "ETIMEDOUT"],
         }
       );
+
+      logger.debugLog("Text generation API response", {
+        model: TEXT_MODEL_ID,
+        hasText: !!response.text,
+        hasCandidates: !!response.candidates?.length,
+        candidateCount: response.candidates?.length,
+        usageMetadata: response.usageMetadata,
+      });
 
       // Extract text from response
       // The new SDK returns text directly or via candidates
@@ -179,6 +199,14 @@ export class GeminiTextProvider implements TextProvider {
       const durationMs = Date.now() - startTime;
       let errorType = "GENERATION_ERROR";
       let errorMessage = error.message || "Unknown error during generation";
+
+      logger.error("Text generation API error", {
+        model: TEXT_MODEL_ID,
+        errorName: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack?.split("\n").slice(0, 5).join("\n"),
+        durationMs,
+      });
 
       // Handle specific Gemini API errors
       if (error.message?.includes("API key") || error.message?.includes("API_KEY")) {

@@ -139,6 +139,15 @@ export class GeminiImageProvider implements ImageProvider {
         };
       }
 
+      logger.debugLog("Image generation API request", {
+        model,
+        modelId,
+        config,
+        hasReferenceImages: referenceImages.length > 0,
+        referenceImageCount: referenceImages.length,
+        promptPreview: prompt.substring(0, 100) + (prompt.length > 100 ? "..." : ""),
+      });
+
       // Use retry wrapper for transient errors and timeout protection
       const response = await withRetry(
         () =>
@@ -156,6 +165,14 @@ export class GeminiImageProvider implements ImageProvider {
           retryableErrors: ["RATE_LIMIT", "429", "503", "502", "ECONNRESET", "ETIMEDOUT"],
         }
       );
+
+      logger.debugLog("Image generation API response", {
+        model,
+        modelId,
+        hasCandidates: !!response.candidates?.length,
+        candidateCount: response.candidates?.length,
+        usageMetadata: response.usageMetadata,
+      });
 
       // Find the image part in the response
       let imageData: string | null = null;
@@ -222,6 +239,15 @@ export class GeminiImageProvider implements ImageProvider {
       const durationMs = Date.now() - startTime;
       let errorType = "GENERATION_ERROR";
       let errorMessage = error.message || "Unknown error during image generation";
+
+      logger.error("Image generation API error", {
+        model,
+        modelId,
+        errorName: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack?.split("\n").slice(0, 5).join("\n"),
+        durationMs,
+      });
 
       // Handle specific Gemini API errors
       if (error.message?.includes("API key") || error.message?.includes("API_KEY")) {

@@ -79,24 +79,47 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   private async startResearch(query: string): Promise<string> {
     const url = `${API_BASE}/interactions`;
 
+    const requestBody = {
+      input: query,
+      agent: DEEP_RESEARCH_AGENT_ID,
+      background: true,
+      agent_config: {
+        type: "deep-research",
+        thinking_summaries: "auto",
+      },
+    };
+
+    logger.debugLog("Deep research API request", {
+      url,
+      method: "POST",
+      agent: DEEP_RESEARCH_AGENT_ID,
+      queryPreview: query.substring(0, 200) + (query.length > 200 ? "..." : ""),
+      requestBody: { ...requestBody, input: `[${query.length} chars]` },
+    });
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-goog-api-key": this.apiKey,
       },
-      body: JSON.stringify({
-        input: query,
-        agent: DEEP_RESEARCH_AGENT_ID,
-        background: true,
-        agent_config: {
-          thinking_summaries: "auto",
-        },
-      }),
+      body: JSON.stringify(requestBody),
+    });
+
+    logger.debugLog("Deep research API response", {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
+      logger.error("Deep research API error response", {
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorText,
+      });
+
       let errorMessage = `Failed to start research: ${response.status}`;
       let isAuthError = false;
 
@@ -134,6 +157,10 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     }
 
     const data = (await response.json()) as InteractionResponse;
+    logger.debugLog("Deep research started successfully", {
+      interactionId: data.id,
+      status: data.status,
+    });
 
     if (!data.id) {
       throw new Error("API_ERROR: No interaction ID returned from API");
@@ -164,6 +191,13 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         );
       }
 
+      logger.debugLog("Polling research status", {
+        url,
+        interactionId,
+        elapsedMs: elapsed,
+        elapsedMinutes: Math.round(elapsed / 1000 / 60 * 10) / 10,
+      });
+
       const response = await fetch(url, {
         method: "GET",
         headers: {
@@ -173,15 +207,24 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
 
       if (!response.ok) {
         const errorText = await response.text();
+        logger.error("Deep research poll error", {
+          interactionId,
+          status: response.status,
+          statusText: response.statusText,
+          errorBody: errorText,
+        });
         throw new Error(`API_ERROR: Failed to poll research status: ${response.status} - ${errorText}`);
       }
 
       const data = (await response.json()) as InteractionResponse;
 
-      logger.debugLog("Research poll", {
+      logger.debugLog("Research poll response", {
         interactionId,
         status: data.status,
         elapsedMs: elapsed,
+        hasOutputs: !!data.outputs,
+        outputCount: data.outputs?.length,
+        hasError: !!data.error,
       });
 
       if (data.status === "completed") {
