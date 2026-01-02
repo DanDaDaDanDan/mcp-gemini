@@ -17,15 +17,18 @@ export interface LogEntry {
 
 export interface UsageEntry {
   timestamp: string;
+  provider: "xai" | "gemini" | "fal";
   model: string;
-  type: "text" | "image";
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  thoughtsTokens?: number;
+  operation: string;
   durationMs: number;
   success: boolean;
   error?: string;
+  metrics?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    thoughtsTokens?: number;
+  };
 }
 
 class Logger {
@@ -49,8 +52,9 @@ class Logger {
       this.logFile = join(logDir, "mcp-gemini.log");
       this.usageFile = join(logDir, "usage.jsonl");
       this.info("Logger initialized", { logDir, logFile: this.logFile, usageFile: this.usageFile });
-    } catch (error: any) {
-      console.error(`[mcp-gemini] Failed to initialize log files: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[mcp-gemini] Failed to initialize log files: ${message}`);
     }
   }
 
@@ -113,9 +117,10 @@ class Logger {
    */
   logUsage(entry: UsageEntry): void {
     // Log summary to stderr
+    const tokens = entry.metrics?.totalTokens ? `, ${entry.metrics.totalTokens} tokens` : "";
     const summary = entry.success
-      ? `${entry.type} generation complete: ${entry.model}, ${entry.totalTokens || "?"} tokens, ${entry.durationMs}ms`
-      : `${entry.type} generation failed: ${entry.model}, ${entry.error}`;
+      ? `${entry.operation} complete: ${entry.model}${tokens}, ${entry.durationMs}ms`
+      : `${entry.operation} failed: ${entry.model}, ${entry.error}`;
     this.info(summary);
 
     // Log detailed usage to file if configured

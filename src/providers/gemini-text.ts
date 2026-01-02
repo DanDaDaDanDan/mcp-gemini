@@ -175,14 +175,17 @@ export class GeminiTextProvider implements TextProvider {
       // Log usage statistics
       logger.logUsage({
         timestamp: new Date().toISOString(),
+        provider: "gemini",
         model: "gemini-3-pro",
-        type: "text",
-        promptTokens: usage?.promptTokens,
-        completionTokens: usage?.completionTokens,
-        totalTokens: usage?.totalTokens,
-        thoughtsTokens: usage?.thoughtsTokens,
+        operation: "generate_text",
         durationMs,
         success: true,
+        metrics: usage ? {
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          thoughtsTokens: usage.thoughtsTokens,
+        } : undefined,
       });
 
       // Include thought summary in response if available
@@ -233,8 +236,9 @@ export class GeminiTextProvider implements TextProvider {
       // Log failed usage
       logger.logUsage({
         timestamp: new Date().toISOString(),
+        provider: "gemini",
         model: "gemini-3-pro",
-        type: "text",
+        operation: "generate_text",
         durationMs,
         success: false,
         error: `${errorType}: ${errorMessage}`,

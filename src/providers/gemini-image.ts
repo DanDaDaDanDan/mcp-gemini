@@ -221,13 +221,16 @@ export class GeminiImageProvider implements ImageProvider {
       // Log usage statistics
       logger.logUsage({
         timestamp: new Date().toISOString(),
+        provider: "gemini",
         model,
-        type: "image",
-        promptTokens: usage?.promptTokens,
-        completionTokens: usage?.completionTokens,
-        totalTokens: usage?.totalTokens,
+        operation: "generate_image",
         durationMs,
         success: true,
+        metrics: usage ? {
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+        } : undefined,
       });
 
       return {
@@ -274,8 +277,9 @@ export class GeminiImageProvider implements ImageProvider {
       // Log failed usage
       logger.logUsage({
         timestamp: new Date().toISOString(),
+        provider: "gemini",
         model,
-        type: "image",
+        operation: "generate_image",
         durationMs,
         success: false,
         error: `${errorType}: ${errorMessage}`,

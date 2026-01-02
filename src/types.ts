@@ -2,6 +2,10 @@
  * Shared types for the MCP Gemini server
  */
 
+// ============================================================================
+// Input Types (Tool Parameters)
+// ============================================================================
+
 // Text generation options for Gemini 3 Pro
 export interface TextGenerateOptions {
   prompt: string;
@@ -82,6 +86,10 @@ export interface DeepResearchResult {
   durationMs: number;
 }
 
+// ============================================================================
+// Result Types
+// ============================================================================
+
 // Common result structure
 export interface GenerateResult {
   text?: string;
@@ -94,6 +102,10 @@ export interface GenerateResult {
   };
   model: string;
 }
+
+// ============================================================================
+// Provider Interfaces
+// ============================================================================
 
 // Model information
 export interface ModelInfo {
@@ -125,6 +137,10 @@ export interface DeepResearchProvider {
   getModelInfo(): ModelInfo;
 }
 
+// ============================================================================
+// Model Constants
+// ============================================================================
+
 // Supported models
 export const SUPPORTED_TEXT_MODELS = ["gemini-3-pro"] as const;
 export const SUPPORTED_IMAGE_MODELS = ["nano-banana", "nano-banana-pro"] as const;
@@ -144,3 +160,60 @@ export function isSupportedImageModel(model: string): model is SupportedImageMod
 // See: https://ai.google.dev/gemini-api/docs/models
 export const TEXT_MODEL_ID = "gemini-3-pro-preview";
 export const DEEP_RESEARCH_AGENT_ID = "deep-research-pro-preview-12-2025";
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+export type MCPProvider = "xai" | "gemini" | "fal";
+
+export type ErrorCategory =
+  | "AUTH_ERROR"
+  | "RATE_LIMIT"
+  | "CONTENT_BLOCKED"
+  | "SAFETY_BLOCK"
+  | "TIMEOUT"
+  | "API_ERROR"
+  | "VALIDATION_ERROR";
+
+export class MCPError extends Error {
+  constructor(
+    public category: ErrorCategory,
+    message: string,
+    public provider: MCPProvider,
+    public statusCode?: number
+  ) {
+    super(`${category}: ${message}`);
+    this.name = "MCPError";
+  }
+}
+
+/**
+ * Categorize an error from the Gemini API
+ */
+export function categorizeError(error: unknown, provider: MCPProvider = "gemini"): MCPError {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = (error as any)?.status || (error as any)?.statusCode;
+
+  if (status === 401 || message.includes("API key") || message.includes("unauthorized")) {
+    return new MCPError("AUTH_ERROR", "Invalid or missing Gemini API key", provider, status);
+  }
+
+  if (status === 429 || message.includes("rate") || message.includes("quota")) {
+    return new MCPError("RATE_LIMIT", "Gemini API rate limit or quota exceeded. Please wait and retry.", provider, status);
+  }
+
+  if (message.includes("safety") || message.includes("SAFETY")) {
+    return new MCPError("SAFETY_BLOCK", "Content was blocked by Gemini safety filters", provider, status);
+  }
+
+  if (message.includes("blocked") || message.includes("content policy")) {
+    return new MCPError("CONTENT_BLOCKED", "Request blocked due to content policy", provider, status);
+  }
+
+  if (message.includes("TIMEOUT") || message.includes("timed out")) {
+    return new MCPError("TIMEOUT", message, provider);
+  }
+
+  return new MCPError("API_ERROR", message, provider, status);
+}

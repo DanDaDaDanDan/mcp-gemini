@@ -158,6 +158,27 @@ GET /v1beta/interactions/{interaction_id}
 - File support: Experimental - requires File Search stores (not inline files)
 - Audio inputs are NOT supported for Deep Research
 
+## Tools
+
+| Tool | Description | Model |
+|------|-------------|-------|
+| `generate_text` | Text generation with thinking | gemini-3-pro |
+| `generate_image` | Image generation/editing | nano-banana, nano-banana-pro |
+| `deep_research` | Autonomous web research | deep-research |
+| `list_models` | List available models | Static |
+
+## Error Categories
+
+| Category | HTTP Status | Meaning |
+|----------|-------------|---------|
+| AUTH_ERROR | 401 | Invalid or missing API key |
+| RATE_LIMIT | 429 | API quota exceeded |
+| SAFETY_BLOCK | 400 | Blocked by Gemini safety filters |
+| CONTENT_BLOCKED | 400 | Content policy violation |
+| TIMEOUT | - | Request exceeded timeout |
+| VALIDATION_ERROR | 422 | Invalid input parameters |
+| API_ERROR | 4xx/5xx | Other API errors |
+
 ## Environment Variables
 
 - `GEMINI_API_KEY` (required) - from https://aistudio.google.com/apikey
