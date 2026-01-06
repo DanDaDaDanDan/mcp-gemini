@@ -21,6 +21,8 @@ import {
 } from "../types.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
+import { calculateTextCost } from "../pricing.js";
+import { costTracker } from "../cost-tracker.js";
 import { readFileSync, existsSync } from "fs";
 import { extname } from "path";
 
@@ -233,10 +235,33 @@ export class GeminiTextProvider implements TextProvider {
         ? `${text}\n\n---\n**Thinking Summary:**\n${thoughtSummary}`
         : text;
 
+      // Calculate cost
+      const cost = calculateTextCost(
+        model,
+        usage?.promptTokens || 0,
+        usage?.completionTokens || 0,
+        usage?.thoughtsTokens || 0
+      );
+
+      // Track cost
+      costTracker.trackCost({
+        timestamp: new Date().toISOString(),
+        model,
+        operation: "generate_text",
+        inputCost: cost.inputCost,
+        outputCost: cost.outputCost,
+        totalCost: cost.totalCost,
+        estimated: cost.estimated,
+        promptTokens: usage?.promptTokens,
+        completionTokens: usage?.completionTokens,
+        thoughtsTokens: usage?.thoughtsTokens,
+      });
+
       return {
         text: finalText,
         model,
         usage,
+        cost,
       };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;

@@ -11,6 +11,8 @@ import type { ImageGenerateOptions, GenerateResult, ModelInfo, ImageProvider } f
 import { type SupportedImageModel } from "../types.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
+import { calculateImageCost } from "../pricing.js";
+import { costTracker } from "../cost-tracker.js";
 
 // Model IDs for image generation
 // See: https://ai.google.dev/gemini-api/docs/models
@@ -233,10 +235,24 @@ export class GeminiImageProvider implements ImageProvider {
         } : undefined,
       });
 
+      // Calculate cost (1 image generated)
+      const cost = calculateImageCost(model, "1K", 1);
+
+      // Track cost
+      costTracker.trackCost({
+        timestamp: new Date().toISOString(),
+        model,
+        operation: "generate_image",
+        imageCost: cost.imageCost,
+        totalCost: cost.totalCost,
+        estimated: cost.estimated,
+      });
+
       return {
         imagePath: outputPath,
         model,
         usage,
+        cost,
       };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;

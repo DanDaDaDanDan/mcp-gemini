@@ -94,17 +94,31 @@ export interface DeepResearchResult {
 // Result Types
 // ============================================================================
 
+// Cost information
+export interface CostInfo {
+  inputCost?: number;
+  outputCost?: number;
+  imageCost?: number;
+  totalCost: number;
+  currency: "USD";
+  estimated: boolean;
+}
+
+// Usage information
+export interface UsageInfo {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  thoughtsTokens?: number;
+}
+
 // Common result structure
 export interface GenerateResult {
   text?: string;
   imagePath?: string;
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-    thoughtsTokens?: number;
-  };
+  usage?: UsageInfo;
   model: string;
+  cost?: CostInfo;
 }
 
 // ============================================================================
