@@ -2,7 +2,8 @@
 
 MCP server for Claude Code providing access to Google's Gemini models:
 
-- **Gemini 3 Pro** - Text generation with thinking/reasoning capabilities (multimodal)
+- **Gemini 3 Pro** - Deep reasoning with thinking capabilities (multimodal)
+- **Gemini 3 Flash** - Fast, balanced model with thinking (multimodal)
 - **Nano Banana** - Fast image generation (Gemini 2.5 Flash Image)
 - **Nano Banana Pro** - High-fidelity image generation (Gemini 3 Pro Image)
 - **Deep Research** - Autonomous web research agent
@@ -48,16 +49,21 @@ Or manually add to your Claude Code MCP settings:
 
 ### generate_text
 
-Generate text using Gemini 3 Pro with thinking capabilities. Supports comprehensive multimodal input.
+Generate text using Gemini 3 Pro or Flash with thinking capabilities. Supports comprehensive multimodal input.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | The prompt to send |
+| `model` | `"gemini-3-pro"` \| `"gemini-3-flash"` | | Model (default: `"gemini-3-pro"`) |
 | `system_prompt` | string | | System instructions |
-| `thinking_level` | `"low"` \| `"high"` | | Thinking depth (default: `"high"`) |
+| `thinking_level` | `"minimal"` \| `"low"` \| `"medium"` \| `"high"` | | Thinking depth (default: `"high"`) |
 | `max_tokens` | number | | Max output tokens (default: 65536) |
 | `temperature` | number | | 0-1 sampling temp (default: 0.7) |
 | `files` | string[] | | File paths for multimodal input |
+
+**Thinking levels by model:**
+- **Pro:** `low`, `high` only
+- **Flash:** `minimal`, `low`, `medium`, `high`
 
 **Supported file formats:**
 - **Images:** jpg, png, webp, heic, heif (max 3,600 per request)
@@ -131,7 +137,8 @@ List available models and their capabilities.
 
 | Model | API ID | Type | Description |
 |-------|--------|------|-------------|
-| gemini-3-pro | `gemini-3-pro-preview` | Text | Thinking/reasoning model (multimodal) |
+| gemini-3-pro | `gemini-3-pro-preview` | Text | Deep reasoning with thinking (multimodal) |
+| gemini-3-flash | `gemini-3-flash-preview` | Text | Fast, balanced with thinking (multimodal) |
 | nano-banana | `gemini-2.5-flash-preview-image-generation` | Image | Fast image generation |
 | nano-banana-pro | `gemini-2.0-flash-exp-image-generation` | Image | High-fidelity images |
 | deep-research | `deep-research-pro-preview-12-2025` | Research | Autonomous web research agent |

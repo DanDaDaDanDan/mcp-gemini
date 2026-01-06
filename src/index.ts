@@ -6,13 +6,15 @@
  * Provides text and image generation capabilities using Google's Gemini models.
  *
  * Models:
- *   - gemini-3-pro: Gemini 3 Pro (Thinking) - text generation with reasoning
+ *   - gemini-3-pro: Gemini 3 Pro (Thinking) - deep reasoning, best for complex tasks
+ *   - gemini-3-flash: Gemini 3 Flash (Thinking) - fast, balanced for throughput
  *   - nano-banana: Gemini 2.5 Flash Image - fast image generation
  *   - nano-banana-pro: Gemini 3 Pro Image - high-fidelity image generation
  *
  * Tools:
- *   - generate_text: Generate text using Gemini 3 Pro
+ *   - generate_text: Generate text using Gemini 3 Pro or Flash
  *   - generate_image: Generate images using Nano Banana or Nano Banana Pro
+ *   - deep_research: Autonomous web research
  *   - list_models: List available models and their capabilities
  *
  * Environment Variables:
@@ -33,7 +35,9 @@ import { GeminiImageProvider } from "./providers/gemini-image.js";
 import { GeminiDeepResearchProvider } from "./providers/deep-research.js";
 import {
   isSupportedImageModel,
+  isSupportedTextModel,
   SUPPORTED_IMAGE_MODELS,
+  SUPPORTED_TEXT_MODELS,
 } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -70,13 +74,20 @@ const TOOLS = [
   {
     name: "generate_text",
     description:
-      "Generate text using Gemini 3 Pro with thinking capabilities. Use this for complex reasoning, writing, analysis, or any text generation task that benefits from deep thinking.",
+      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Use this for complex reasoning, writing, analysis, or any text generation task.",
     inputSchema: {
       type: "object" as const,
       properties: {
         prompt: {
           type: "string",
           description: "The complete prompt to send to the model, including all necessary context",
+        },
+        model: {
+          type: "string",
+          enum: [...SUPPORTED_TEXT_MODELS],
+          description:
+            "Model to use: 'gemini-3-pro' (default, best reasoning) or 'gemini-3-flash' (faster, balanced)",
+          default: "gemini-3-pro",
         },
         system_prompt: {
           type: "string",
@@ -85,14 +96,14 @@ const TOOLS = [
         },
         thinking_level: {
           type: "string",
-          enum: ["low", "high"],
+          enum: ["minimal", "low", "medium", "high"],
           description:
-            "Thinking depth: 'high' for maximum reasoning (default), 'low' for faster responses",
+            "Thinking depth. Pro supports: low, high. Flash supports: minimal, low, medium, high. Default: high",
           default: "high",
         },
         max_tokens: {
           type: "number",
-          description: "Maximum number of tokens to generate (default: 65536, max for Gemini 3 Pro)",
+          description: "Maximum number of tokens to generate (default: 65536)",
           default: 65536,
         },
         temperature: {
@@ -205,9 +216,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   if (name === "list_models") {
     const models = [];
 
-    // Add text model
+    // Add text models (Pro and Flash)
     models.push({
-      ...textProvider.getModelInfo(),
+      ...textProvider.getModelInfo("gemini-3-pro"),
+      available: true,
+    });
+    models.push({
+      ...textProvider.getModelInfo("gemini-3-flash"),
       available: true,
     });
 
@@ -241,6 +256,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   if (name === "generate_text") {
     const {
       prompt,
+      model,
       system_prompt: systemPrompt,
       thinking_level: thinkingLevel,
       max_tokens: maxTokens,
@@ -248,8 +264,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       files,
     } = args as {
       prompt: string;
+      model?: "gemini-3-pro" | "gemini-3-flash";
       system_prompt?: string;
-      thinking_level?: "low" | "high";
+      thinking_level?: "minimal" | "low" | "medium" | "high";
       max_tokens?: number;
       temperature?: number;
       files?: string[];
@@ -268,9 +285,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       };
     }
 
+    // Validate model if provided
+    if (model && !isSupportedTextModel(model)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: Unknown text model "${model}". Supported models: ${SUPPORTED_TEXT_MODELS.join(", ")}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     try {
       const result = await textProvider.generate({
         prompt,
+        model,
         systemPrompt,
         thinkingLevel,
         maxTokens,

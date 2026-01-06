@@ -6,15 +6,19 @@
 // Input Types (Tool Parameters)
 // ============================================================================
 
-// Text generation options for Gemini 3 Pro
+// Text generation options for Gemini 3 Pro/Flash
 export interface TextGenerateOptions {
   prompt: string;
   systemPrompt?: string;
-  thinkingLevel?: "low" | "high";
+  model?: SupportedTextModel;
+  thinkingLevel?: ThinkingLevelOption;
   maxTokens?: number;
   temperature?: number;
   files?: string[]; // File paths for multimodal input (images, audio, video, PDFs, text files)
 }
+
+// Thinking levels - Flash supports all 4, Pro only supports low/high
+export type ThinkingLevelOption = "minimal" | "low" | "medium" | "high";
 
 // Supported MIME types for multimodal input
 // See: https://ai.google.dev/gemini-api/docs
@@ -122,7 +126,7 @@ export interface ModelInfo {
 // Provider interfaces
 export interface TextProvider {
   generate(options: TextGenerateOptions): Promise<GenerateResult>;
-  getModelInfo(): ModelInfo;
+  getModelInfo(model?: SupportedTextModel): ModelInfo;
   isAvailable(): Promise<boolean>;
 }
 
@@ -142,7 +146,7 @@ export interface DeepResearchProvider {
 // ============================================================================
 
 // Supported models
-export const SUPPORTED_TEXT_MODELS = ["gemini-3-pro"] as const;
+export const SUPPORTED_TEXT_MODELS = ["gemini-3-pro", "gemini-3-flash"] as const;
 export const SUPPORTED_IMAGE_MODELS = ["nano-banana", "nano-banana-pro"] as const;
 
 export type SupportedTextModel = (typeof SUPPORTED_TEXT_MODELS)[number];
@@ -158,8 +162,36 @@ export function isSupportedImageModel(model: string): model is SupportedImageMod
 
 // API model IDs
 // See: https://ai.google.dev/gemini-api/docs/models
-export const TEXT_MODEL_ID = "gemini-3-pro-preview";
+export const TEXT_MODEL_IDS: Record<SupportedTextModel, string> = {
+  "gemini-3-pro": "gemini-3-pro-preview",
+  "gemini-3-flash": "gemini-3-flash-preview",
+} as const;
+
+export const DEFAULT_TEXT_MODEL: SupportedTextModel = "gemini-3-pro";
+
 export const DEEP_RESEARCH_AGENT_ID = "deep-research-pro-preview-12-2025";
+
+// Thinking levels supported by each model
+// Pro: only low/high; Flash: all four levels
+export const MODEL_THINKING_LEVELS: Record<SupportedTextModel, readonly ThinkingLevelOption[]> = {
+  "gemini-3-pro": ["low", "high"] as const,
+  "gemini-3-flash": ["minimal", "low", "medium", "high"] as const,
+} as const;
+
+/**
+ * Validate that a thinking level is supported by the given model.
+ * Returns an error message if invalid, undefined if valid.
+ */
+export function validateThinkingLevel(
+  model: SupportedTextModel,
+  level: ThinkingLevelOption
+): string | undefined {
+  const supportedLevels = MODEL_THINKING_LEVELS[model];
+  if (!supportedLevels.includes(level)) {
+    return `${model} only supports thinking levels: ${supportedLevels.join(", ")}. Got: ${level}`;
+  }
+  return undefined;
+}
 
 // ============================================================================
 // Error Types

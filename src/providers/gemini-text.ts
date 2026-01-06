@@ -1,16 +1,42 @@
 /**
- * Gemini 3 Pro text provider with thinking capabilities
+ * Gemini 3 Pro/Flash text provider with thinking capabilities
  *
  * Uses the new @google/genai SDK which supports thinkingConfig
  */
 
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import type { TextGenerateOptions, GenerateResult, ModelInfo, TextProvider } from "../types.js";
-import { TEXT_MODEL_ID, SUPPORTED_MIME_TYPES } from "../types.js";
+import type {
+  TextGenerateOptions,
+  GenerateResult,
+  ModelInfo,
+  TextProvider,
+  SupportedTextModel,
+  ThinkingLevelOption,
+} from "../types.js";
+import {
+  TEXT_MODEL_IDS,
+  DEFAULT_TEXT_MODEL,
+  SUPPORTED_MIME_TYPES,
+  validateThinkingLevel,
+} from "../types.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
 import { readFileSync, existsSync } from "fs";
 import { extname } from "path";
+
+/**
+ * Map user-facing thinking level strings to API values.
+ *
+ * Note: SDK v1.33.0 only has ThinkingLevel.LOW and ThinkingLevel.HIGH.
+ * MINIMAL and MEDIUM are not yet in the enum but are accepted by the API.
+ * We pass uppercase strings directly which the API accepts.
+ */
+const THINKING_LEVEL_MAP: Record<ThinkingLevelOption, string> = {
+  minimal: "MINIMAL",
+  low: ThinkingLevel.LOW,     // "LOW"
+  medium: "MEDIUM",
+  high: ThinkingLevel.HIGH,   // "HIGH"
+};
 
 /**
  * Get MIME type for a file path. Throws if file type is not supported.
@@ -38,19 +64,32 @@ export class GeminiTextProvider implements TextProvider {
       throw new Error("Gemini API key is required");
     }
     this.client = new GoogleGenAI({ apiKey });
-    logger.info("Gemini text provider initialized", { model: TEXT_MODEL_ID });
+    logger.info("Gemini text provider initialized", {
+      supportedModels: Object.keys(TEXT_MODEL_IDS),
+      defaultModel: DEFAULT_TEXT_MODEL,
+    });
   }
 
   async generate(options: TextGenerateOptions): Promise<GenerateResult> {
     const {
       prompt,
       systemPrompt,
+      model = DEFAULT_TEXT_MODEL,
       thinkingLevel = "high",
       maxTokens = 65536,
       temperature = 0.7,
       files = [],
     } = options;
     const startTime = Date.now();
+
+    // Resolve API model ID
+    const apiModelId = TEXT_MODEL_IDS[model];
+
+    // Validate thinking level is supported by the selected model
+    const validationError = validateThinkingLevel(model, thinkingLevel);
+    if (validationError) {
+      throw new Error(`VALIDATION_ERROR: ${validationError}`);
+    }
 
     // Construct the full prompt with system instructions
     let textPrompt = prompt;
@@ -59,6 +98,8 @@ export class GeminiTextProvider implements TextProvider {
     }
 
     logger.debugLog("Starting text generation", {
+      model,
+      apiModelId,
       promptLength: prompt.length,
       hasSystemPrompt: !!systemPrompt,
       thinkingLevel,
@@ -89,19 +130,17 @@ export class GeminiTextProvider implements TextProvider {
       const config: any = {
         maxOutputTokens: maxTokens,
         temperature: temperature,
-        thinkingConfig: {},
+        thinkingConfig: {
+          // Map user-facing level to SDK enum
+          thinkingLevel: THINKING_LEVEL_MAP[thinkingLevel],
+          // Include thought summaries for transparency
+          includeThoughts: true,
+        },
       };
 
-      // Configure thinking for Gemini 3 Pro
-      // Note: Gemini 3 cannot fully disable thinking; only LOW and HIGH are supported
-      config.thinkingConfig.thinkingLevel =
-        thinkingLevel === "low" ? ThinkingLevel.LOW : ThinkingLevel.HIGH;
-
-      // Include thought summaries for transparency
-      config.thinkingConfig.includeThoughts = true;
-
       logger.debugLog("Text generation API request", {
-        model: TEXT_MODEL_ID,
+        model,
+        apiModelId,
         config: {
           maxOutputTokens: config.maxOutputTokens,
           temperature: config.temperature,
@@ -118,7 +157,7 @@ export class GeminiTextProvider implements TextProvider {
           withTimeout(
             () =>
               this.client.models.generateContent({
-                model: TEXT_MODEL_ID,
+                model: apiModelId,
                 contents,
                 config,
               }),
@@ -131,7 +170,8 @@ export class GeminiTextProvider implements TextProvider {
       );
 
       logger.debugLog("Text generation API response", {
-        model: TEXT_MODEL_ID,
+        model,
+        apiModelId,
         hasText: !!response.text,
         hasCandidates: !!response.candidates?.length,
         candidateCount: response.candidates?.length,
@@ -176,7 +216,7 @@ export class GeminiTextProvider implements TextProvider {
       logger.logUsage({
         timestamp: new Date().toISOString(),
         provider: "gemini",
-        model: "gemini-3-pro",
+        model,
         operation: "generate_text",
         durationMs,
         success: true,
@@ -195,7 +235,7 @@ export class GeminiTextProvider implements TextProvider {
 
       return {
         text: finalText,
-        model: "gemini-3-pro",
+        model,
         usage,
       };
     } catch (error: any) {
@@ -204,7 +244,8 @@ export class GeminiTextProvider implements TextProvider {
       let errorMessage = error.message || "Unknown error during generation";
 
       logger.error("Text generation API error", {
-        model: TEXT_MODEL_ID,
+        model,
+        apiModelId,
         errorName: error.name,
         errorMessage: error.message,
         errorStack: error.stack?.split("\n").slice(0, 5).join("\n"),
@@ -237,7 +278,7 @@ export class GeminiTextProvider implements TextProvider {
       logger.logUsage({
         timestamp: new Date().toISOString(),
         provider: "gemini",
-        model: "gemini-3-pro",
+        model,
         operation: "generate_text",
         durationMs,
         success: false,
@@ -248,25 +289,40 @@ export class GeminiTextProvider implements TextProvider {
     }
   }
 
-  getModelInfo(): ModelInfo {
-    return {
-      id: "gemini-3-pro",
-      name: "Gemini 3 Pro (Thinking)",
-      provider: "google",
-      type: "text",
-      contextWindow: 1000000, // 1M tokens
-      maxOutput: 65536, // 64K tokens max output
-      supportsThinking: true,
-      description:
-        "Google's most capable reasoning model with thinking capabilities. Excellent for complex creative and analytical tasks.",
+  getModelInfo(model: SupportedTextModel = DEFAULT_TEXT_MODEL): ModelInfo {
+    const modelInfoMap: Record<SupportedTextModel, ModelInfo> = {
+      "gemini-3-pro": {
+        id: "gemini-3-pro",
+        name: "Gemini 3 Pro (Thinking)",
+        provider: "google",
+        type: "text",
+        contextWindow: 1048576, // 1M tokens
+        maxOutput: 65536, // 64K tokens max output
+        supportsThinking: true,
+        description:
+          "Google's most capable reasoning model with deep thinking. Best for complex analytical and creative tasks. Supports thinking levels: low, high.",
+      },
+      "gemini-3-flash": {
+        id: "gemini-3-flash",
+        name: "Gemini 3 Flash (Thinking)",
+        provider: "google",
+        type: "text",
+        contextWindow: 1048576, // 1M tokens
+        maxOutput: 65536, // 64K tokens max output
+        supportsThinking: true,
+        description:
+          "Fast, balanced model optimized for speed and scale. Best for chat, high-throughput, and simple tasks. Supports thinking levels: minimal, low, medium, high.",
+      },
     };
+    return modelInfoMap[model];
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      // Simple test to check if API is accessible
+      // Simple test to check if API is accessible using default model
+      const apiModelId = TEXT_MODEL_IDS[DEFAULT_TEXT_MODEL];
       const response = await this.client.models.generateContent({
-        model: TEXT_MODEL_ID,
+        model: apiModelId,
         contents: "Hi",
         config: {
           maxOutputTokens: 10,
