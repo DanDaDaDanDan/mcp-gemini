@@ -11,8 +11,8 @@ import { logger } from "../logger.js";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-// Default timeout: 30 minutes (research can take up to 60 min, most complete in ~20)
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+// Default timeout: 60 minutes (research can take up to 60 min, most complete in ~20)
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 
 interface InteractionResponse {
@@ -257,6 +257,80 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  /**
+   * Check status of a running research task by interaction ID
+   * Can be used to resume/retrieve results after a timeout
+   */
+  async checkResearch(interactionId: string): Promise<DeepResearchResult> {
+    const startTime = Date.now();
+
+    logger.info("Checking research status", { interactionId });
+
+    const url = `${API_BASE}/interactions/${interactionId}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "x-goog-api-key": this.apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error("Check research error", {
+        interactionId,
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorText,
+      });
+
+      if (response.status === 404) {
+        throw new Error(`NOT_FOUND: Research task not found - interaction ID: ${interactionId}`);
+      }
+      throw new Error(`API_ERROR: Failed to check research status: ${response.status} - ${errorText}`);
+    }
+
+    const data = (await response.json()) as InteractionResponse;
+
+    logger.info("Research status retrieved", {
+      interactionId,
+      status: data.status,
+    });
+
+    if (data.status === "completed") {
+      const text = data.outputs
+        ?.map((output) => output.text)
+        .filter(Boolean)
+        .join("\n\n") || "";
+
+      if (!text) {
+        throw new Error("API_ERROR: Research completed but no output text found");
+      }
+
+      return {
+        text,
+        status: "completed",
+        model: "deep-research",
+        interactionId,
+        durationMs: Date.now() - startTime,
+      };
+    }
+
+    if (data.status === "failed") {
+      const errorMessage = data.error?.message || "Research failed with unknown error";
+      throw new Error(`RESEARCH_FAILED: ${errorMessage}`);
+    }
+
+    // Still in progress
+    return {
+      text: `Research still in progress. Status: ${data.status}. Check again later using interaction ID: ${interactionId}`,
+      status: "in_progress" as any,
+      model: "deep-research",
+      interactionId,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
   getModelInfo(): ModelInfo {
     return {
       id: "deep-research",
@@ -265,7 +339,7 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       type: "research",
       description:
         "AI research agent that autonomously searches the web, analyzes multiple sources, " +
-        "and produces comprehensive research reports. Takes 5-30 minutes to complete.",
+        "and produces comprehensive research reports. Takes 5-60 minutes to complete.",
     };
   }
 }

@@ -172,7 +172,8 @@ const TOOLS = [
     description:
       "Perform autonomous web research using Google's Deep Research agent. " +
       "The agent searches the web, analyzes multiple sources, and produces comprehensive research reports. " +
-      "This is a long-running operation that typically takes 5-30 minutes to complete.",
+      "This is a long-running operation that typically takes 5-60 minutes to complete. " +
+      "If it times out, use check_research with the returned interaction_id to retrieve results.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -184,13 +185,29 @@ const TOOLS = [
         timeout_minutes: {
           type: "number",
           description:
-            "Maximum time to wait for research completion in minutes (default: 30, max: 60)",
-          default: 30,
+            "Maximum time to wait for research completion in minutes (default: 60, max: 120)",
+          default: 60,
           minimum: 5,
-          maximum: 60,
+          maximum: 120,
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "check_research",
+    description:
+      "Check the status of a running deep research task or retrieve results after a timeout. " +
+      "Use this with the interaction_id returned from deep_research if it times out or to poll for completion.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        interaction_id: {
+          type: "string",
+          description: "The interaction ID returned from a previous deep_research call",
+        },
+      },
+      required: ["interaction_id"],
     },
   },
   {
@@ -472,11 +489,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       };
     }
 
-    // Convert timeout from minutes to milliseconds
-    const timeoutMs = (timeoutMinutes || 30) * 60 * 1000;
+    // Convert timeout from minutes to milliseconds (default 60 minutes)
+    const timeoutMs = (timeoutMinutes || 60) * 60 * 1000;
 
     try {
-      logger.info("Starting deep research", { queryLength: query.length, timeoutMinutes: timeoutMinutes || 30 });
+      logger.info("Starting deep research", { queryLength: query.length, timeoutMinutes: timeoutMinutes || 60 });
 
       const result = await deepResearchProvider.research({
         query,
@@ -501,6 +518,62 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     } catch (error: any) {
       const errorMessage = error.message || "Unknown error during deep research";
       logger.error("Deep research failed", { error: errorMessage });
+
+      // Include interaction ID in timeout errors so user can check_research later
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  // Check research status tool
+  if (name === "check_research") {
+    const { interaction_id: interactionId } = args as {
+      interaction_id: string;
+    };
+
+    // Validate interaction ID
+    if (!interactionId || interactionId.trim().length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: interaction_id is required",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      logger.info("Checking research status", { interactionId });
+
+      const result = await deepResearchProvider.checkResearch(interactionId);
+
+      // Return result (could be completed, in_progress, or failed)
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.text,
+          },
+        ],
+        _meta: {
+          model: result.model,
+          interactionId: result.interactionId,
+          status: result.status,
+          durationMs: result.durationMs,
+        },
+      };
+    } catch (error: any) {
+      const errorMessage = error.message || "Unknown error checking research status";
+      logger.error("Check research failed", { error: errorMessage, interactionId });
 
       return {
         content: [
