@@ -15,10 +15,10 @@ import { calculateImageCost } from "../pricing.js";
 import { costTracker } from "../cost-tracker.js";
 
 // Model IDs for image generation
-// See: https://ai.google.dev/gemini-api/docs/models
+// See: https://ai.google.dev/gemini-api/docs/models/experimental-models
 const IMAGE_MODEL_IDS: Record<SupportedImageModel, string> = {
-  "nano-banana": "gemini-2.5-flash-preview-image-generation",
-  "nano-banana-pro": "gemini-2.0-flash-exp-image-generation",
+  "nano-banana": "gemini-2.5-flash-image",
+  "nano-banana-pro": "gemini-3-pro-image-preview",
 };
 
 // Maximum reference images per model
@@ -317,11 +317,11 @@ export class GeminiImageProvider implements ImageProvider {
       },
       "nano-banana-pro": {
         id: "nano-banana-pro",
-        name: "Nano Banana Pro (Gemini 2.0 Flash Exp Image)",
+        name: "Nano Banana Pro (Gemini 3 Pro Image)",
         provider: "google",
         type: "image",
         description:
-          "High-fidelity image generation model. Excellent for detailed, production-quality images with accurate text rendering.",
+          "High-fidelity image generation model. Supports 2K/4K resolution. Excellent for detailed, production-quality images with accurate text rendering.",
       },
     };
 
