@@ -11,8 +11,8 @@ import { logger } from "../logger.js";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-// Default timeout: 30 minutes (research can take up to 60 min, most complete in ~20)
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+// Default timeout: 60 minutes (research can take up to 60 min, most complete in ~20)
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 
 interface InteractionResponse {
