@@ -112,7 +112,7 @@ Perform autonomous web research using Google's Deep Research agent. Returns comp
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Research question or topic |
-| `timeout_minutes` | number | | Max wait time (default: 30, max: 60) |
+| `timeout_minutes` | number | | Max wait time (default: 60, max: 60) |
 
 **Note:** This is a long-running operation that typically takes 5-30 minutes.
 

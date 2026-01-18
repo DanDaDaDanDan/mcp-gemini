@@ -24,8 +24,8 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 |---------------|--------------|------|
 | gemini-3-pro | `gemini-3-pro-preview` | Text/Thinking (deep reasoning) |
 | gemini-3-flash | `gemini-3-flash-preview` | Text/Thinking (fast, balanced) |
-| nano-banana | `gemini-2.5-flash-preview-image-generation` | Image (fast) |
-| nano-banana-pro | `gemini-2.0-flash-exp-image-generation` | Image (high-quality) |
+| nano-banana | `gemini-2.5-flash-image` | Image (fast) |
+| nano-banana-pro | `gemini-3-pro-image-preview` | Image (high-quality, 2K/4K) |
 | deep-research | `deep-research-pro-preview-12-2025` | Research (async) |
 
 ### Model Comparison: Pro vs Flash
