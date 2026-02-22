@@ -27,17 +27,13 @@ import { readFileSync, existsSync } from "fs";
 import { extname } from "path";
 
 /**
- * Map user-facing thinking level strings to API values.
- *
- * Note: SDK v1.33.0 only has ThinkingLevel.LOW and ThinkingLevel.HIGH.
- * MINIMAL and MEDIUM are not yet in the enum but are accepted by the API.
- * We pass uppercase strings directly which the API accepts.
+ * Map user-facing thinking level strings to SDK enum values.
  */
 const THINKING_LEVEL_MAP: Record<ThinkingLevelOption, string> = {
-  minimal: "MINIMAL",
-  low: ThinkingLevel.LOW,     // "LOW"
-  medium: "MEDIUM",
-  high: ThinkingLevel.HIGH,   // "HIGH"
+  minimal: ThinkingLevel.MINIMAL,
+  low: ThinkingLevel.LOW,
+  medium: ThinkingLevel.MEDIUM,
+  high: ThinkingLevel.HIGH,
 };
 
 /**
@@ -316,6 +312,17 @@ export class GeminiTextProvider implements TextProvider {
 
   getModelInfo(model: SupportedTextModel = DEFAULT_TEXT_MODEL): ModelInfo {
     const modelInfoMap: Record<SupportedTextModel, ModelInfo> = {
+      "gemini-3.1-pro": {
+        id: "gemini-3.1-pro",
+        name: "Gemini 3.1 Pro (Deep Think)",
+        provider: "google",
+        type: "text",
+        contextWindow: 1048576, // 1M tokens
+        maxOutput: 65536, // 64K tokens max output
+        supportsThinking: true,
+        description:
+          "Google's latest and most capable reasoning model. HIGH thinking activates Deep Think Mini for dramatically improved reasoning (1-8+ min). Supports thinking levels: low, medium, high.",
+      },
       "gemini-3-pro": {
         id: "gemini-3-pro",
         name: "Gemini 3 Pro (Thinking)",
@@ -325,7 +332,7 @@ export class GeminiTextProvider implements TextProvider {
         maxOutput: 65536, // 64K tokens max output
         supportsThinking: true,
         description:
-          "Google's most capable reasoning model with deep thinking. Best for complex analytical and creative tasks. Supports thinking levels: low, high.",
+          "Previous generation reasoning model. Supports thinking levels: low, high.",
       },
       "gemini-3-flash": {
         id: "gemini-3-flash",

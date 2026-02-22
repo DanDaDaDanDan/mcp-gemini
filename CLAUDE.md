@@ -22,20 +22,22 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 
 | Friendly Name | API Model ID | Type |
 |---------------|--------------|------|
+| gemini-3.1-pro | `gemini-3.1-pro-preview` | Text/Deep Think (latest, most capable) |
 | gemini-3-pro | `gemini-3-pro-preview` | Text/Thinking (deep reasoning) |
 | gemini-3-flash | `gemini-3-flash-preview` | Text/Thinking (fast, balanced) |
 | nano-banana | `gemini-2.5-flash-image` | Image (fast) |
 | nano-banana-pro | `gemini-3-pro-image-preview` | Image (high-quality, 2K/4K) |
 | deep-research | `deep-research-pro-preview-12-2025` | Research (async) |
 
-### Model Comparison: Pro vs Flash
+### Model Comparison: Text Models
 
-| Attribute | gemini-3-pro | gemini-3-flash |
-|-----------|--------------|----------------|
-| Input Tokens | 1,048,576 (1M) | 1,048,576 (1M) |
-| Output Tokens | 65,536 (64K) | 65,536 (64K) |
-| Thinking Levels | `low`, `high` | `minimal`, `low`, `medium`, `high` |
-| Best For | Complex reasoning, analysis | Speed, chat, high-throughput |
+| Attribute | gemini-3.1-pro | gemini-3-pro | gemini-3-flash |
+|-----------|----------------|--------------|----------------|
+| Input Tokens | 1,048,576 (1M) | 1,048,576 (1M) | 1,048,576 (1M) |
+| Output Tokens | 65,536 (64K) | 65,536 (64K) | 65,536 (64K) |
+| Thinking Levels | `low`, `medium`, `high` | `low`, `high` | `minimal`, `low`, `medium`, `high` |
+| Deep Think Mini | Yes (at HIGH) | No | No |
+| Best For | Complex reasoning, hard problems | General reasoning | Speed, chat, high-throughput |
 
 ## Thinking Configuration
 
@@ -52,22 +54,24 @@ config: {
 }
 ```
 
-**Note:** SDK v1.33.0 only exports `ThinkingLevel.LOW` and `ThinkingLevel.HIGH`. For `MINIMAL` and `MEDIUM`, pass uppercase strings directly (e.g., `"MINIMAL"`) - the API accepts them.
+**Note:** SDK v1.42.0+ exports all four `ThinkingLevel` enum values: `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`.
 
 ### Thinking Levels by Model
 
-| Level | Pro | Flash | Description |
-|-------|-----|-------|-------------|
-| `minimal` | ❌ | ✅ | Minimizes latency; model likely won't think |
-| `low` | ✅ | ✅ | Faster responses, simple tasks |
-| `medium` | ❌ | ✅ | Balanced thinking for most tasks |
-| `high` | ✅ (default) | ✅ (default) | Maximum reasoning depth |
+| Level | 3.1 Pro | 3 Pro | Flash | Description |
+|-------|---------|-------|-------|-------------|
+| `minimal` | ❌ | ❌ | ✅ | Minimizes latency; model likely won't think |
+| `low` | ✅ | ✅ | ✅ | Faster responses, simple tasks |
+| `medium` | ✅ | ❌ | ✅ | Balanced thinking (equivalent to 3 Pro's HIGH) |
+| `high` | ✅ (default) | ✅ (default) | ✅ (default) | Maximum reasoning depth; activates Deep Think Mini on 3.1 Pro |
 
 **Key points:**
 - Neither model can fully disable thinking
-- Pro only supports `low` and `high`; using `minimal` or `medium` returns VALIDATION_ERROR
+- 3.1 Pro supports `low`, `medium`, `high`; HIGH activates Deep Think Mini (1-8+ min, dramatically improved reasoning)
+- 3 Pro only supports `low` and `high`; using `minimal` or `medium` returns VALIDATION_ERROR
 - `includeThoughts: true` returns thought summaries in response parts
 - Thoughts tokens tracked via `usageMetadata.thoughtsTokenCount`
+- Deep Think Mini at HIGH can consume 8K-32K+ thinking tokens per response
 
 ## Architecture
 
@@ -152,39 +156,47 @@ response.candidates[0].content.parts[].inlineData.mimeType
 
 ## Deep Research
 
-The Deep Research agent uses a REST API (not the SDK) for autonomous web research:
+The Deep Research agent uses the `@google/genai` SDK's native interactions API:
 
 ```typescript
-// Start research - returns interaction ID
-POST /v1beta/interactions
-{
+// Start research
+const interaction = await client.interactions.create({
   input: "research query",
   agent: "deep-research-pro-preview-12-2025",
   background: true,
   agent_config: {
     type: "deep-research",        // REQUIRED - must specify agent type
     thinking_summaries: "auto"    // Optional - enables progress updates
-  }
-}
+  },
+});
 
 // Poll for completion
-GET /v1beta/interactions/{interaction_id}
-// Returns: { status: "in_progress" | "completed" | "failed", outputs: [...] }
+const result = await client.interactions.get(interaction.id);
+// result.status: "in_progress" | "completed" | "failed" | "cancelled" | "requires_action"
+// result.outputs: Array<TextContent | ...>
+
+// Cancel a running task
+await client.interactions.cancel(interaction.id);
+
+// Delete an interaction
+await client.interactions.delete(interaction.id);
 ```
 
 **Key points:**
 - Long-running: typically 5-30 minutes, max 60 minutes
-- Async polling: start task, poll until `status` is `completed` or `failed`
-- Output is in `response.outputs[].text`
-- Uses `x-goog-api-key` header for authentication (same API key)
+- Async polling: start task, poll until `status` is `completed`, `failed`, or `cancelled`
+- Output text extracted from `outputs` array where `output.type === "text"`
+- SDK handles auth via API key passed at GoogleGenAI construction
+- Supports `previous_interaction_id` for follow-up queries
 - File support: Experimental - requires File Search stores (not inline files)
 - Audio inputs are NOT supported for Deep Research
+- Streaming supported via `stream: true` (returns SSE events)
 
 ## Tools
 
 | Tool | Description | Model(s) |
 |------|-------------|----------|
-| `generate_text` | Text generation with thinking | gemini-3-pro (default), gemini-3-flash |
+| `generate_text` | Text generation with thinking | gemini-3.1-pro (default), gemini-3-pro, gemini-3-flash |
 | `generate_image` | Image generation/editing | nano-banana (default), nano-banana-pro |
 | `deep_research` | Autonomous web research | deep-research |
 | `list_models` | List available models | Static |
@@ -194,7 +206,7 @@ GET /v1beta/interactions/{interaction_id}
 ```typescript
 {
   prompt: string;           // Required
-  model?: "gemini-3-pro" | "gemini-3-flash";  // Default: gemini-3-pro
+  model?: "gemini-3.1-pro" | "gemini-3-pro" | "gemini-3-flash";  // Default: gemini-3.1-pro
   thinking_level?: "minimal" | "low" | "medium" | "high";  // Default: high
   system_prompt?: string;
   max_tokens?: number;      // Default: 65536
@@ -235,7 +247,7 @@ npm start         # Run server
 After modifying providers, verify:
 1. Build succeeds: `npm run build`
 2. Model IDs are current (check Google docs)
-3. ThinkingLevel values map correctly (SDK v1.33.0 lacks MINIMAL/MEDIUM enums; strings used)
+3. ThinkingLevel values map correctly (SDK v1.42.0 has all enum values)
 4. Error categories match API responses
 
 ## Adding New Models

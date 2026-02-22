@@ -6,7 +6,8 @@
  * Provides text and image generation capabilities using Google's Gemini models.
  *
  * Models:
- *   - gemini-3-pro: Gemini 3 Pro (Thinking) - deep reasoning, best for complex tasks
+ *   - gemini-3.1-pro: Gemini 3.1 Pro (Deep Think) - latest, most capable reasoning
+ *   - gemini-3-pro: Gemini 3 Pro (Thinking) - deep reasoning
  *   - gemini-3-flash: Gemini 3 Flash (Thinking) - fast, balanced for throughput
  *   - nano-banana: Gemini 2.5 Flash Image - fast image generation
  *   - nano-banana-pro: Gemini 3 Pro Image - high-fidelity image generation
@@ -75,7 +76,7 @@ const TOOLS = [
   {
     name: "generate_text",
     description:
-      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Use this for complex reasoning, writing, analysis, or any text generation task.",
+      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Use this for complex reasoning, writing, analysis, or any text generation task. Gemini 3.1 Pro supports Deep Think Mini at HIGH thinking level for dramatically improved reasoning.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -87,8 +88,8 @@ const TOOLS = [
           type: "string",
           enum: [...SUPPORTED_TEXT_MODELS],
           description:
-            "Model to use: 'gemini-3-pro' (default, best reasoning) or 'gemini-3-flash' (faster, balanced)",
-          default: "gemini-3-pro",
+            "Model to use: 'gemini-3.1-pro' (default, Deep Think), 'gemini-3-pro' (previous gen), or 'gemini-3-flash' (faster, balanced)",
+          default: "gemini-3.1-pro",
         },
         system_prompt: {
           type: "string",
@@ -99,7 +100,7 @@ const TOOLS = [
           type: "string",
           enum: ["minimal", "low", "medium", "high"],
           description:
-            "Thinking depth. Pro supports: low, high. Flash supports: minimal, low, medium, high. Default: high",
+            "Thinking depth. 3.1 Pro supports: low, medium, high. 3 Pro supports: low, high. Flash supports: minimal, low, medium, high. Default: high",
           default: "high",
         },
         max_tokens: {
@@ -249,7 +250,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   if (name === "list_models") {
     const models = [];
 
-    // Add text models (Pro and Flash)
+    // Add text models
+    models.push({
+      ...textProvider.getModelInfo("gemini-3.1-pro"),
+      available: true,
+    });
     models.push({
       ...textProvider.getModelInfo("gemini-3-pro"),
       available: true,
@@ -297,7 +302,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       files,
     } = args as {
       prompt: string;
-      model?: "gemini-3-pro" | "gemini-3-flash";
+      model?: "gemini-3.1-pro" | "gemini-3-pro" | "gemini-3-flash";
       system_prompt?: string;
       thinking_level?: "minimal" | "low" | "medium" | "high";
       max_tokens?: number;

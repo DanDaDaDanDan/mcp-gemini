@@ -35,10 +35,15 @@ export interface CostInfo {
 // ============================================================================
 
 export const GEMINI_TEXT_PRICING: Record<string, TokenPricing> = {
+  "gemini-3.1-pro": {
+    input: 2.0,
+    output: 12.0,
+    thoughts: 12.0, // Thinking tokens billed as output; HIGH (Deep Think Mini) uses 8K-32K+ thinking tokens
+  },
   "gemini-3-pro": {
     input: 2.0,
     output: 12.0,
-    thoughts: 12.0, // Thinking tokens billed as output
+    thoughts: 12.0,
   },
   "gemini-3-flash": {
     input: 0.5,

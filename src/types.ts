@@ -17,7 +17,7 @@ export interface TextGenerateOptions {
   files?: string[]; // File paths for multimodal input (images, audio, video, PDFs, text files)
 }
 
-// Thinking levels - Flash supports all 4, Pro only supports low/high
+// Thinking levels - Flash supports all 4, 3 Pro supports low/high, 3.1 Pro supports low/medium/high
 export type ThinkingLevelOption = "minimal" | "low" | "medium" | "high";
 
 // Supported MIME types for multimodal input
@@ -160,7 +160,7 @@ export interface DeepResearchProvider {
 // ============================================================================
 
 // Supported models
-export const SUPPORTED_TEXT_MODELS = ["gemini-3-pro", "gemini-3-flash"] as const;
+export const SUPPORTED_TEXT_MODELS = ["gemini-3.1-pro", "gemini-3-pro", "gemini-3-flash"] as const;
 export const SUPPORTED_IMAGE_MODELS = ["nano-banana", "nano-banana-pro"] as const;
 
 export type SupportedTextModel = (typeof SUPPORTED_TEXT_MODELS)[number];
@@ -177,17 +177,19 @@ export function isSupportedImageModel(model: string): model is SupportedImageMod
 // API model IDs
 // See: https://ai.google.dev/gemini-api/docs/models
 export const TEXT_MODEL_IDS: Record<SupportedTextModel, string> = {
+  "gemini-3.1-pro": "gemini-3.1-pro-preview",
   "gemini-3-pro": "gemini-3-pro-preview",
   "gemini-3-flash": "gemini-3-flash-preview",
 } as const;
 
-export const DEFAULT_TEXT_MODEL: SupportedTextModel = "gemini-3-pro";
+export const DEFAULT_TEXT_MODEL: SupportedTextModel = "gemini-3.1-pro";
 
 export const DEEP_RESEARCH_AGENT_ID = "deep-research-pro-preview-12-2025";
 
 // Thinking levels supported by each model
-// Pro: only low/high; Flash: all four levels
+// 3.1 Pro: low/medium/high (HIGH activates Deep Think Mini); 3 Pro: low/high; Flash: all four levels
 export const MODEL_THINKING_LEVELS: Record<SupportedTextModel, readonly ThinkingLevelOption[]> = {
+  "gemini-3.1-pro": ["low", "medium", "high"] as const,
   "gemini-3-pro": ["low", "high"] as const,
   "gemini-3-flash": ["minimal", "low", "medium", "high"] as const,
 } as const;

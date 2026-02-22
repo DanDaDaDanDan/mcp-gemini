@@ -1,35 +1,27 @@
 /**
  * Deep Research provider using Google's Deep Research Agent API
  *
- * Uses direct REST API calls since the @google/genai SDK doesn't support the interactions API yet.
+ * Uses the @google/genai SDK's native interactions API (client.interactions).
  * The agent performs autonomous web research and returns comprehensive reports.
  */
 
+import { GoogleGenAI } from "@google/genai";
 import type { DeepResearchOptions, DeepResearchResult, ModelInfo, DeepResearchProvider } from "../types.js";
 import { DEEP_RESEARCH_AGENT_ID } from "../types.js";
 import { logger } from "../logger.js";
-
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 // Default timeout: 60 minutes (research can take up to 60 min, most complete in ~20)
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 
-interface InteractionResponse {
-  id: string;
-  status: "in_progress" | "completed" | "failed";
-  outputs?: Array<{ text?: string }>;
-  error?: { message: string };
-}
-
 export class GeminiDeepResearchProvider implements DeepResearchProvider {
-  private apiKey: string;
+  private client: GoogleGenAI;
 
   constructor(apiKey: string) {
     if (!apiKey) {
       throw new Error("Gemini API key is required");
     }
-    this.apiKey = apiKey;
+    this.client = new GoogleGenAI({ apiKey });
     logger.info("Deep Research provider initialized", { agent: DEEP_RESEARCH_AGENT_ID });
   }
 
@@ -74,103 +66,57 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   }
 
   /**
-   * Start a new research interaction
+   * Start a new research interaction using the SDK
    */
   private async startResearch(query: string): Promise<string> {
-    const url = `${API_BASE}/interactions`;
-
-    const requestBody = {
-      input: query,
-      agent: DEEP_RESEARCH_AGENT_ID,
-      background: true,
-      agent_config: {
-        type: "deep-research",
-        thinking_summaries: "auto",
-      },
-    };
-
     logger.debugLog("Deep research API request", {
-      url,
-      method: "POST",
       agent: DEEP_RESEARCH_AGENT_ID,
       queryPreview: query.substring(0, 200) + (query.length > 200 ? "..." : ""),
-      requestBody: { ...requestBody, input: `[${query.length} chars]` },
     });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": this.apiKey,
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    logger.debugLog("Deep research API response", {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error("Deep research API error response", {
-        status: response.status,
-        statusText: response.statusText,
-        errorBody: errorText,
+    try {
+      const interaction = await this.client.interactions.create({
+        input: query,
+        agent: DEEP_RESEARCH_AGENT_ID,
+        background: true,
+        agent_config: {
+          type: "deep-research",
+          thinking_summaries: "auto",
+        },
       });
 
-      let errorMessage = `Failed to start research: ${response.status}`;
-      let isAuthError = false;
+      logger.debugLog("Deep research started successfully", {
+        interactionId: interaction.id,
+        status: interaction.status,
+      });
 
-      try {
-        let errorJson = JSON.parse(errorText);
-        // API sometimes returns array wrapper: [{error: {...}}]
-        if (Array.isArray(errorJson) && errorJson.length > 0) {
-          errorJson = errorJson[0];
-        }
-        if (errorJson.error?.message) {
-          errorMessage = errorJson.error.message;
-        }
-        // Google returns 400 (not 401/403) for invalid API keys with API_KEY_INVALID reason
-        if (errorJson.error?.details) {
-          const hasApiKeyInvalid = errorJson.error.details.some(
-            (d: { reason?: string }) => d.reason === "API_KEY_INVALID"
-          );
-          if (hasApiKeyInvalid) {
-            isAuthError = true;
-          }
-        }
-      } catch {
-        if (errorText) {
-          errorMessage = errorText;
-        }
+      if (!interaction.id) {
+        throw new Error("API_ERROR: No interaction ID returned from API");
       }
 
-      if (isAuthError || response.status === 401 || response.status === 403) {
-        throw new Error(`AUTH_ERROR: ${errorMessage}`);
-      } else if (response.status === 429) {
-        throw new Error(`RATE_LIMIT: ${errorMessage}`);
+      return interaction.id;
+    } catch (error: any) {
+      const message = error.message || String(error);
+
+      logger.error("Deep research API error", {
+        errorMessage: message,
+        errorStatus: error.status,
+      });
+
+      if (error.status === 401 || error.status === 403 || message.includes("API_KEY_INVALID") || message.includes("API key")) {
+        throw new Error(`AUTH_ERROR: ${message}`);
+      } else if (error.status === 429 || message.includes("rate") || message.includes("quota")) {
+        throw new Error(`RATE_LIMIT: ${message}`);
+      } else if (message.startsWith("API_ERROR:")) {
+        throw error;
       } else {
-        throw new Error(`API_ERROR: ${errorMessage}`);
+        throw new Error(`API_ERROR: ${message}`);
       }
     }
-
-    const data = (await response.json()) as InteractionResponse;
-    logger.debugLog("Deep research started successfully", {
-      interactionId: data.id,
-      status: data.status,
-    });
-
-    if (!data.id) {
-      throw new Error("API_ERROR: No interaction ID returned from API");
-    }
-
-    return data.id;
   }
 
   /**
-   * Poll for research completion
+   * Poll for research completion using the SDK
    */
   private async pollForCompletion(
     interactionId: string,
@@ -178,8 +124,6 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     pollIntervalMs: number,
     startTime: number
   ): Promise<{ text: string; status: "completed" | "failed"; model: string }> {
-    const url = `${API_BASE}/interactions/${interactionId}`;
-
     while (true) {
       const elapsed = Date.now() - startTime;
 
@@ -192,46 +136,23 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       }
 
       logger.debugLog("Polling research status", {
-        url,
         interactionId,
         elapsedMs: elapsed,
         elapsedMinutes: Math.round(elapsed / 1000 / 60 * 10) / 10,
       });
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "x-goog-api-key": this.apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error("Deep research poll error", {
-          interactionId,
-          status: response.status,
-          statusText: response.statusText,
-          errorBody: errorText,
-        });
-        throw new Error(`API_ERROR: Failed to poll research status: ${response.status} - ${errorText}`);
-      }
-
-      const data = (await response.json()) as InteractionResponse;
+      const interaction = await this.client.interactions.get(interactionId);
 
       logger.debugLog("Research poll response", {
         interactionId,
-        status: data.status,
+        status: interaction.status,
         elapsedMs: elapsed,
-        hasOutputs: !!data.outputs,
-        outputCount: data.outputs?.length,
-        hasError: !!data.error,
+        hasOutputs: !!interaction.outputs,
+        outputCount: interaction.outputs?.length,
       });
 
-      if (data.status === "completed") {
-        const text = data.outputs
-          ?.map((output) => output.text)
-          .filter(Boolean)
-          .join("\n\n") || "";
+      if (interaction.status === "completed") {
+        const text = this.extractText(interaction.outputs);
 
         if (!text) {
           throw new Error("API_ERROR: Research completed but no output text found");
@@ -244,13 +165,27 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         };
       }
 
-      if (data.status === "failed") {
-        const errorMessage = data.error?.message || "Research failed with unknown error";
-        throw new Error(`RESEARCH_FAILED: ${errorMessage}`);
+      if (interaction.status === "failed") {
+        throw new Error("RESEARCH_FAILED: Research failed with unknown error");
+      }
+
+      if (interaction.status === "cancelled") {
+        throw new Error("RESEARCH_CANCELLED: Research was cancelled");
       }
 
       await this.sleep(pollIntervalMs);
     }
+  }
+
+  /**
+   * Extract text content from interaction outputs
+   */
+  private extractText(outputs?: Array<any>): string {
+    if (!outputs) return "";
+    return outputs
+      .filter((output) => output.type === "text" && output.text)
+      .map((output) => output.text)
+      .join("\n\n");
   }
 
   private sleep(ms: number): Promise<void> {
@@ -266,69 +201,58 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
 
     logger.info("Checking research status", { interactionId });
 
-    const url = `${API_BASE}/interactions/${interactionId}`;
+    try {
+      const interaction = await this.client.interactions.get(interactionId);
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "x-goog-api-key": this.apiKey,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error("Check research error", {
+      logger.info("Research status retrieved", {
         interactionId,
-        status: response.status,
-        statusText: response.statusText,
-        errorBody: errorText,
+        status: interaction.status,
       });
 
-      if (response.status === 404) {
-        throw new Error(`NOT_FOUND: Research task not found - interaction ID: ${interactionId}`);
-      }
-      throw new Error(`API_ERROR: Failed to check research status: ${response.status} - ${errorText}`);
-    }
+      if (interaction.status === "completed") {
+        const text = this.extractText(interaction.outputs);
 
-    const data = (await response.json()) as InteractionResponse;
+        if (!text) {
+          throw new Error("API_ERROR: Research completed but no output text found");
+        }
 
-    logger.info("Research status retrieved", {
-      interactionId,
-      status: data.status,
-    });
-
-    if (data.status === "completed") {
-      const text = data.outputs
-        ?.map((output) => output.text)
-        .filter(Boolean)
-        .join("\n\n") || "";
-
-      if (!text) {
-        throw new Error("API_ERROR: Research completed but no output text found");
+        return {
+          text,
+          status: "completed",
+          model: "deep-research",
+          interactionId,
+          durationMs: Date.now() - startTime,
+        };
       }
 
+      if (interaction.status === "failed") {
+        throw new Error("RESEARCH_FAILED: Research failed with unknown error");
+      }
+
+      if (interaction.status === "cancelled") {
+        throw new Error("RESEARCH_CANCELLED: Research was cancelled");
+      }
+
+      // Still in progress or requires_action
       return {
-        text,
-        status: "completed",
+        text: `Research still in progress. Status: ${interaction.status}. Check again later using interaction ID: ${interactionId}`,
+        status: "in_progress" as any,
         model: "deep-research",
         interactionId,
         durationMs: Date.now() - startTime,
       };
-    }
+    } catch (error: any) {
+      if (error.message?.startsWith("RESEARCH_")) {
+        throw error;
+      }
 
-    if (data.status === "failed") {
-      const errorMessage = data.error?.message || "Research failed with unknown error";
-      throw new Error(`RESEARCH_FAILED: ${errorMessage}`);
-    }
+      const message = error.message || String(error);
 
-    // Still in progress
-    return {
-      text: `Research still in progress. Status: ${data.status}. Check again later using interaction ID: ${interactionId}`,
-      status: "in_progress" as any,
-      model: "deep-research",
-      interactionId,
-      durationMs: Date.now() - startTime,
-    };
+      if (error.status === 404) {
+        throw new Error(`NOT_FOUND: Research task not found - interaction ID: ${interactionId}`);
+      }
+      throw new Error(`API_ERROR: Failed to check research status: ${message}`);
+    }
   }
 
   getModelInfo(): ModelInfo {
