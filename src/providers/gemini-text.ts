@@ -19,6 +19,7 @@ import {
   SUPPORTED_MIME_TYPES,
   validateThinkingLevel,
 } from "../types.js";
+import { FILE_TOOL_DEFINITIONS, executeFileTool } from "../file-tools.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
 import { calculateTextCost } from "../pricing.js";
@@ -77,6 +78,7 @@ export class GeminiTextProvider implements TextProvider {
       maxTokens = 65536,
       temperature = 0.7,
       attachments = [],
+      enableTools = false,
     } = options;
     const startTime = Date.now();
 
@@ -179,6 +181,17 @@ export class GeminiTextProvider implements TextProvider {
         },
       };
 
+      // Add file tools if enabled
+      if (enableTools) {
+        config.tools = [{
+          functionDeclarations: FILE_TOOL_DEFINITIONS.map((t) => ({
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          })),
+        }];
+      }
+
       logger.debugLog("Text generation API request", {
         model,
         apiModelId,
@@ -193,7 +206,7 @@ export class GeminiTextProvider implements TextProvider {
       });
 
       // Use retry wrapper for transient errors and timeout protection
-      const response = await withRetry(
+      let response = await withRetry(
         () =>
           withTimeout(
             () =>
@@ -209,6 +222,69 @@ export class GeminiTextProvider implements TextProvider {
           retryableErrors: ["RATE_LIMIT", "429", "503", "502", "ECONNRESET", "ETIMEDOUT"],
         }
       );
+
+      // Agentic tool-calling loop: let the model call file tools until it produces a final answer
+      if (enableTools) {
+        // Track conversation for multi-turn
+        const conversationContents: any[] = [
+          { role: "user", parts: contents.map((c: any) => c.text ? { text: c.text } : { inlineData: c.inlineData }) },
+        ];
+        let toolRound = 0;
+
+        while (true) {
+          const parts = response.candidates?.[0]?.content?.parts || [];
+          const functionCalls = parts.filter((p: any) => p.functionCall);
+          if (functionCalls.length === 0) break;
+
+          toolRound++;
+          logger.debugLog("Tool call round", {
+            round: toolRound,
+            toolCalls: functionCalls.map((fc: any) => ({ name: fc.functionCall.name, args: fc.functionCall.args })),
+          });
+
+          // Add model response to conversation
+          conversationContents.push({ role: "model", parts });
+
+          // Execute tools and add results
+          const functionResponses = functionCalls.map((fc: any) => {
+            const result = executeFileTool(fc.functionCall.name, fc.functionCall.args || {});
+            logger.debugLog("Tool result", {
+              tool: fc.functionCall.name,
+              resultLength: result.length,
+            });
+            return {
+              functionResponse: {
+                name: fc.functionCall.name,
+                response: { result },
+              },
+            };
+          });
+
+          conversationContents.push({ role: "user", parts: functionResponses });
+
+          // Continue conversation
+          response = await withRetry(
+            () =>
+              withTimeout(
+                () =>
+                  this.client.models.generateContent({
+                    model: apiModelId,
+                    contents: conversationContents,
+                    config,
+                  }),
+                DEFAULT_TIMEOUT_MS
+              ),
+            {
+              maxRetries: 2,
+              retryableErrors: ["RATE_LIMIT", "429", "503", "502", "ECONNRESET", "ETIMEDOUT"],
+            }
+          );
+        }
+
+        if (toolRound > 0) {
+          logger.debugLog("Tool calling completed", { totalRounds: toolRound });
+        }
+      }
 
       logger.debugLog("Text generation API response", {
         model,

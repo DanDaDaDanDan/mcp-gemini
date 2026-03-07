@@ -148,6 +148,13 @@ const TOOLS = [
             },
           },
         },
+        enable_tools: {
+          type: "boolean",
+          description:
+            "Enable built-in file tools (read_file, list_directory, grep_search) that the model " +
+            "can call during generation to explore the local filesystem for additional context.",
+          default: false,
+        },
       },
       required: ["prompt"],
     },
@@ -321,6 +328,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       max_tokens: maxTokens,
       temperature,
       attachments,
+      enable_tools: enableTools,
     } = args as {
       prompt: string;
       model?: "gemini-3.1-pro" | "gemini-3-pro" | "gemini-3-flash";
@@ -329,6 +337,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       max_tokens?: number;
       temperature?: number;
       attachments?: Array<{ path?: string; data?: string; url?: string; media_type?: string; filename?: string; }>;
+      enable_tools?: boolean;
     };
 
     // Validate prompt
@@ -366,6 +375,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         maxTokens,
         temperature,
         attachments,
+        enableTools,
       });
 
       // Return successful result

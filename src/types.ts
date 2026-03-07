@@ -24,6 +24,7 @@ export interface TextGenerateOptions {
   maxTokens?: number;
   temperature?: number;
   attachments?: Attachment[]; // File attachments for multimodal input
+  enableTools?: boolean; // Enable built-in file tools (read_file, list_directory, grep_search)
 }
 
 // Thinking levels - Flash supports all 4, 3 Pro supports low/high, 3.1 Pro supports low/medium/high
