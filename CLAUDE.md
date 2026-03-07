@@ -110,23 +110,39 @@ Text generation supports comprehensive multimodal input via file paths. All supp
 - **PDF**: Max 1,000 pages, ~258 tokens per page
 - **Video**: ~258 tokens per frame at 1 FPS + 32 tokens/sec audio
 
-### Usage
+### Attachment Sources (exactly one required per attachment)
+
+| Field | Description |
+|-------|-------------|
+| `path` | Local file path — server reads and base64-encodes. Media type inferred from extension. |
+| `data` | Base64-encoded content (raw or data URI). Requires `media_type`. |
+| `url` | URL — server fetches and inlines. Requires `media_type`. |
+
+### Optional Fields
+
+| Field | Description |
+|-------|-------------|
+| `media_type` | MIME type. Required with `data` and `url`, inferred from `path`. |
+| `filename` | Filename hint. Auto-detected from `path`. |
+
+### Example
 
 ```typescript
-// In gemini-text.ts - files are read and base64 encoded
-const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
-
-for (const filePath of files) {
-  const mimeType = getMimeType(filePath);  // Uses SUPPORTED_MIME_TYPES lookup
-  const data = readFileSync(filePath, { encoding: "base64" });
-  contents.push({ inlineData: { mimeType, data } });
-}
-contents.push({ text: textPrompt });
+generate_text({
+  prompt: "Describe this image",
+  attachments: [
+    { path: "/path/to/photo.jpg" },                           // local file
+    { data: "iVBOR...", media_type: "image/png" },             // base64
+    { url: "https://example.com/image.png", media_type: "image/png" },  // URL
+  ]
+})
 ```
 
-Files are added before text (standard multimodal ordering). Fails fast if:
-- File doesn't exist
+Attachments are added before text (standard multimodal ordering). Fails fast if:
+- File at `path` doesn't exist
 - File extension is not in SUPPORTED_MIME_TYPES
+- `media_type` missing when required
+- Multiple or zero sources provided per attachment
 
 ## Response Handling
 
@@ -196,7 +212,7 @@ await client.interactions.delete(interaction.id);
 
 | Tool | Description | Model(s) |
 |------|-------------|----------|
-| `generate_text` | Text generation with thinking | gemini-3.1-pro (default), gemini-3-pro, gemini-3-flash |
+| `generate_text` | Text generation with thinking and file attachments | gemini-3.1-pro (default), gemini-3-pro, gemini-3-flash |
 | `generate_image` | Image generation/editing | nano-banana (default), nano-banana-pro |
 | `deep_research` | Autonomous web research | deep-research |
 | `list_models` | List available models | Static |
@@ -211,7 +227,7 @@ await client.interactions.delete(interaction.id);
   system_prompt?: string;
   max_tokens?: number;      // Default: 65536
   temperature?: number;     // Default: 0.7, range 0-1
-  files?: string[];         // Multimodal file paths
+  attachments?: Attachment[];  // Multimodal file attachments (path, data, or URL)
 }
 ```
 

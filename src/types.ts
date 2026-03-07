@@ -6,6 +6,15 @@
 // Input Types (Tool Parameters)
 // ============================================================================
 
+// File attachment for multimodal input
+export interface Attachment {
+  path?: string;       // Local file path — server reads and base64-encodes
+  data?: string;       // Base64-encoded content (raw or data URI)
+  url?: string;        // URL — server fetches and base64-encodes (Gemini requires inline data)
+  media_type?: string; // MIME type (required with data, inferred from path)
+  filename?: string;   // Optional filename hint (auto-detected from path)
+}
+
 // Text generation options for Gemini 3 Pro/Flash
 export interface TextGenerateOptions {
   prompt: string;
@@ -14,7 +23,7 @@ export interface TextGenerateOptions {
   thinkingLevel?: ThinkingLevelOption;
   maxTokens?: number;
   temperature?: number;
-  files?: string[]; // File paths for multimodal input (images, audio, video, PDFs, text files)
+  attachments?: Attachment[]; // File attachments for multimodal input
 }
 
 // Thinking levels - Flash supports all 4, 3 Pro supports low/high, 3.1 Pro supports low/medium/high

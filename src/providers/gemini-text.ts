@@ -24,7 +24,7 @@ import { withRetry, withTimeout } from "../retry.js";
 import { calculateTextCost } from "../pricing.js";
 import { costTracker } from "../cost-tracker.js";
 import { readFileSync, existsSync } from "fs";
-import { extname } from "path";
+import { basename, extname } from "path";
 
 /**
  * Map user-facing thinking level strings to SDK enum values.
@@ -76,7 +76,7 @@ export class GeminiTextProvider implements TextProvider {
       thinkingLevel = "high",
       maxTokens = 65536,
       temperature = 0.7,
-      files = [],
+      attachments = [],
     } = options;
     const startTime = Date.now();
 
@@ -103,21 +103,64 @@ export class GeminiTextProvider implements TextProvider {
       thinkingLevel,
       maxTokens,
       temperature,
-      fileCount: files.length,
+      attachmentCount: attachments.length,
     });
 
     // Build contents array for multimodal input
     const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
-    // Add files first if provided (images, audio, video, PDFs, text files)
-    for (const filePath of files) {
-      if (!existsSync(filePath)) {
-        throw new Error(`File not found: ${filePath}`);
+    // Add attachments if provided (images, audio, video, PDFs, text files)
+    for (let i = 0; i < attachments.length; i++) {
+      const attachment = attachments[i];
+      const sources = [attachment.path, attachment.data, attachment.url].filter(Boolean);
+      if (sources.length !== 1) {
+        throw new Error(
+          `VALIDATION_ERROR: Attachment ${i}: exactly one of 'path', 'data', or 'url' must be provided (got ${sources.length})`
+        );
       }
-      const mimeType = getMimeType(filePath);
-      const data = readFileSync(filePath, { encoding: "base64" });
-      contents.push({ inlineData: { mimeType, data } });
-      logger.debugLog("Added file to request", { filePath, mimeType });
+
+      let mimeType: string | undefined = attachment.media_type;
+      let base64Data: string;
+
+      if (attachment.path) {
+        if (!existsSync(attachment.path)) {
+          throw new Error(`File not found: ${attachment.path}`);
+        }
+        if (!mimeType) {
+          mimeType = getMimeType(attachment.path);
+        }
+        base64Data = readFileSync(attachment.path, { encoding: "base64" });
+        logger.debugLog("Added file attachment", { path: attachment.path, mimeType });
+      } else if (attachment.data) {
+        if (!mimeType) {
+          throw new Error(`VALIDATION_ERROR: Attachment ${i}: 'media_type' is required when using 'data'`);
+        }
+        // Handle both raw base64 and data URI formats
+        if (attachment.data.startsWith("data:")) {
+          const match = attachment.data.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) {
+            throw new Error(`VALIDATION_ERROR: Attachment ${i}: invalid data URI format`);
+          }
+          base64Data = match[2];
+        } else {
+          base64Data = attachment.data;
+        }
+        logger.debugLog("Added base64 attachment", { mimeType, dataLength: base64Data.length });
+      } else {
+        // URL — fetch and inline since Gemini requires inline data
+        if (!mimeType) {
+          throw new Error(`VALIDATION_ERROR: Attachment ${i}: 'media_type' is required when using 'url'`);
+        }
+        const response = await fetch(attachment.url!);
+        if (!response.ok) {
+          throw new Error(`VALIDATION_ERROR: Attachment ${i}: failed to fetch URL: ${response.status} ${response.statusText}`);
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        base64Data = buffer.toString("base64");
+        logger.debugLog("Added URL attachment", { url: attachment.url, mimeType });
+      }
+
+      contents.push({ inlineData: { mimeType: mimeType!, data: base64Data } });
     }
 
     // Add text prompt
@@ -146,7 +189,7 @@ export class GeminiTextProvider implements TextProvider {
           includeThoughts: config.thinkingConfig.includeThoughts,
         },
         contentsCount: contents.length,
-        fileTypes: files.map(f => extname(f).toLowerCase()),
+        attachmentCount: attachments.length,
       });
 
       // Use retry wrapper for transient errors and timeout protection

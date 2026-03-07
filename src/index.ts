@@ -76,7 +76,7 @@ const TOOLS = [
   {
     name: "generate_text",
     description:
-      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Use this for complex reasoning, writing, analysis, or any text generation task. Gemini 3.1 Pro supports Deep Think Mini at HIGH thinking level for dramatically improved reasoning.",
+      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Supports file attachments (images, audio, video, PDFs, text files) for multimodal input. Use this for complex reasoning, writing, analysis, or any text generation task. Gemini 3.1 Pro supports Deep Think Mini at HIGH thinking level for dramatically improved reasoning.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -116,16 +116,37 @@ const TOOLS = [
           minimum: 0,
           maximum: 1,
         },
-        files: {
+        attachments: {
           type: "array",
-          items: { type: "string" },
           description:
-            "File paths for multimodal input. Supports: " +
-            "Images (jpg, png, webp, heic, heif), " +
-            "Audio (wav, mp3, aiff, aac, ogg, flac - up to 9.5 hours), " +
-            "Video (mp4, mpeg, mov, avi, flv, webm, wmv, 3gp - up to 2 hours), " +
-            "Documents (pdf - up to 1000 pages), " +
-            "Text (txt, md, html, xml, css, js, ts, json, csv, rtf).",
+            "File attachments for multimodal input. Each must provide exactly one of: 'path' (local file), 'data' (base64), or 'url'. " +
+            "Supports: Images (jpg, png, webp, heic, heif), Audio (wav, mp3, aiff, aac, ogg, flac), " +
+            "Video (mp4, mpeg, mov, avi, flv, webm, wmv, 3gp), Documents (pdf), Text (txt, md, html, xml, css, js, ts, json, csv, rtf).",
+          items: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "Local file path — server reads and base64-encodes. Media type inferred from extension.",
+              },
+              data: {
+                type: "string",
+                description: "Base64-encoded content (raw base64 or data URI). Requires media_type.",
+              },
+              url: {
+                type: "string",
+                description: "URL — server fetches and inlines the content. Requires media_type.",
+              },
+              media_type: {
+                type: "string",
+                description: "MIME type (required with 'data' and 'url', inferred from 'path' extension).",
+              },
+              filename: {
+                type: "string",
+                description: "Optional filename hint (auto-detected from path)",
+              },
+            },
+          },
         },
       },
       required: ["prompt"],
@@ -299,7 +320,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       thinking_level: thinkingLevel,
       max_tokens: maxTokens,
       temperature,
-      files,
+      attachments,
     } = args as {
       prompt: string;
       model?: "gemini-3.1-pro" | "gemini-3-pro" | "gemini-3-flash";
@@ -307,7 +328,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       thinking_level?: "minimal" | "low" | "medium" | "high";
       max_tokens?: number;
       temperature?: number;
-      files?: string[];
+      attachments?: Array<{ path?: string; data?: string; url?: string; media_type?: string; filename?: string; }>;
     };
 
     // Validate prompt
@@ -344,7 +365,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         thinkingLevel,
         maxTokens,
         temperature,
-        files,
+        attachments,
       });
 
       // Return successful result
