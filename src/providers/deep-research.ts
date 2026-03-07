@@ -10,8 +10,8 @@ import type { DeepResearchOptions, DeepResearchResult, ModelInfo, DeepResearchPr
 import { DEEP_RESEARCH_AGENT_ID } from "../types.js";
 import { logger } from "../logger.js";
 
-// Default timeout: 60 minutes (research can take up to 60 min, most complete in ~20)
-const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
+// Default timeout: 120 minutes (research can take up to 60 min, most complete in ~20)
+const DEFAULT_TIMEOUT_MS = 120 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 
 export class GeminiDeepResearchProvider implements DeepResearchProvider {

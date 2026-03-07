@@ -28,8 +28,8 @@ const MAX_REFERENCE_IMAGES: Record<SupportedImageModel, number> = {
   "nano-banana-pro": 14, // Gemini 3 Pro Image
 };
 
-// Default timeout for image generation (60 minutes)
-const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
+// Default timeout for image generation (120 minutes)
+const DEFAULT_TIMEOUT_MS = 120 * 60 * 1000;
 
 // Supported aspect ratios
 const VALID_ASPECT_RATIOS = [

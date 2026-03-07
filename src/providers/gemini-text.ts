@@ -51,8 +51,8 @@ function getMimeType(filePath: string): string {
   return mimeType;
 }
 
-// Default timeout for generation requests (60 minutes for extended thinking)
-const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
+// Default timeout for generation requests (120 minutes for extended thinking)
+const DEFAULT_TIMEOUT_MS = 120 * 60 * 1000;
 
 export class GeminiTextProvider implements TextProvider {
   private client: GoogleGenAI;
