@@ -6,7 +6,7 @@
  * Provides text and image generation capabilities using Google's Gemini models.
  *
  * Models:
- *   - gemini-3.1-pro: Gemini 3.1 Pro (Deep Think) - latest, most capable reasoning
+ *   - gemini-3.1-pro: Gemini 3.1 Pro - latest, most capable reasoning
  *   - gemini-3-pro: Gemini 3 Pro (Thinking) - deep reasoning
  *   - gemini-3-flash: Gemini 3 Flash (Thinking) - fast, balanced for throughput
  *   - nano-banana: Gemini 2.5 Flash Image - fast image generation
@@ -76,7 +76,7 @@ const TOOLS = [
   {
     name: "generate_text",
     description:
-      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Supports file attachments (images, audio, video, PDFs, text files) for multimodal input. Use this for complex reasoning, writing, analysis, or any text generation task. Gemini 3.1 Pro supports Deep Think Mini at HIGH thinking level for dramatically improved reasoning.",
+      "Generate text using Gemini 3 Pro or Flash with thinking capabilities. Supports file attachments (images, audio, video, PDFs, text files) for multimodal input. Use this for complex reasoning, writing, analysis, or any text generation task.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -88,7 +88,7 @@ const TOOLS = [
           type: "string",
           enum: [...SUPPORTED_TEXT_MODELS],
           description:
-            "Model to use: 'gemini-3.1-pro' (default, Deep Think), 'gemini-3-pro' (previous gen), or 'gemini-3-flash' (faster, balanced)",
+            "Model to use: 'gemini-3.1-pro' (default, most capable), 'gemini-3-pro' (previous gen), or 'gemini-3-flash' (faster, balanced)",
           default: "gemini-3.1-pro",
         },
         system_prompt: {

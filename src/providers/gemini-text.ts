@@ -433,14 +433,14 @@ export class GeminiTextProvider implements TextProvider {
     const modelInfoMap: Record<SupportedTextModel, ModelInfo> = {
       "gemini-3.1-pro": {
         id: "gemini-3.1-pro",
-        name: "Gemini 3.1 Pro (Deep Think)",
+        name: "Gemini 3.1 Pro",
         provider: "google",
         type: "text",
         contextWindow: 1048576, // 1M tokens
         maxOutput: 65536, // 64K tokens max output
         supportsThinking: true,
         description:
-          "Google's latest and most capable reasoning model. HIGH thinking activates Deep Think Mini for dramatically improved reasoning (1-8+ min). Supports thinking levels: low, medium, high.",
+          "Google's latest and most capable reasoning model. Supports thinking levels: low, medium, high.",
       },
       "gemini-3-pro": {
         id: "gemini-3-pro",

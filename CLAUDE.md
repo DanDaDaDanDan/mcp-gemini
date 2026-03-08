@@ -22,7 +22,7 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 
 | Friendly Name | API Model ID | Type |
 |---------------|--------------|------|
-| gemini-3.1-pro | `gemini-3.1-pro-preview` | Text/Deep Think (latest, most capable) |
+| gemini-3.1-pro | `gemini-3.1-pro-preview` | Text/Thinking (latest, most capable) |
 | gemini-3-pro | `gemini-3-pro-preview` | Text/Thinking (deep reasoning) |
 | gemini-3-flash | `gemini-3-flash-preview` | Text/Thinking (fast, balanced) |
 | nano-banana | `gemini-2.5-flash-image` | Image (fast) |
@@ -36,7 +36,6 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 | Input Tokens | 1,048,576 (1M) | 1,048,576 (1M) | 1,048,576 (1M) |
 | Output Tokens | 65,536 (64K) | 65,536 (64K) | 65,536 (64K) |
 | Thinking Levels | `low`, `medium`, `high` | `low`, `high` | `minimal`, `low`, `medium`, `high` |
-| Deep Think Mini | Yes (at HIGH) | No | No |
 | Best For | Complex reasoning, hard problems | General reasoning | Speed, chat, high-throughput |
 
 ## Thinking Configuration
@@ -63,15 +62,14 @@ config: {
 | `minimal` | ❌ | ❌ | ✅ | Minimizes latency; model likely won't think |
 | `low` | ✅ | ✅ | ✅ | Faster responses, simple tasks |
 | `medium` | ✅ | ❌ | ✅ | Balanced thinking (equivalent to 3 Pro's HIGH) |
-| `high` | ✅ (default) | ✅ (default) | ✅ (default) | Maximum reasoning depth; activates Deep Think Mini on 3.1 Pro |
+| `high` | ✅ (default) | ✅ (default) | ✅ (default) | Maximum reasoning depth |
 
 **Key points:**
 - Neither model can fully disable thinking
-- 3.1 Pro supports `low`, `medium`, `high`; HIGH activates Deep Think Mini (1-8+ min, dramatically improved reasoning)
+- 3.1 Pro supports `low`, `medium`, `high`
 - 3 Pro only supports `low` and `high`; using `minimal` or `medium` returns VALIDATION_ERROR
 - `includeThoughts: true` returns thought summaries in response parts
 - Thoughts tokens tracked via `usageMetadata.thoughtsTokenCount`
-- Deep Think Mini at HIGH can consume 8K-32K+ thinking tokens per response
 
 ## Architecture
 

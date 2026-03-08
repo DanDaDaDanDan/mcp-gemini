@@ -197,7 +197,7 @@ export const DEFAULT_TEXT_MODEL: SupportedTextModel = "gemini-3.1-pro";
 export const DEEP_RESEARCH_AGENT_ID = "deep-research-pro-preview-12-2025";
 
 // Thinking levels supported by each model
-// 3.1 Pro: low/medium/high (HIGH activates Deep Think Mini); 3 Pro: low/high; Flash: all four levels
+// 3.1 Pro: low/medium/high; 3 Pro: low/high; Flash: all four levels
 export const MODEL_THINKING_LEVELS: Record<SupportedTextModel, readonly ThinkingLevelOption[]> = {
   "gemini-3.1-pro": ["low", "medium", "high"] as const,
   "gemini-3-pro": ["low", "high"] as const,
