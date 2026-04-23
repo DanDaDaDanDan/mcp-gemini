@@ -34,6 +34,36 @@ const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 // Web tools that `disable_web: true` should strip
 const WEB_TOOLS: ResearchTool[] = ["google_search", "url_context"];
 
+/**
+ * Convert an inline-data attachment into an Interactions-API typed content part,
+ * or (for text-like MIME types) an inlined text part. The Deep Research
+ * DocumentContent type only accepts application/pdf, so text/* and
+ * application/json attachments must be inlined as text instead.
+ */
+function toInteractionContent(
+  mimeType: string,
+  base64: string,
+  filenameHint?: string
+): { type: "image" | "document" | "audio" | "video"; data: string; mime_type: string }
+  | { type: "text"; text: string } {
+  if (mimeType.startsWith("image/")) {
+    return { type: "image", data: base64, mime_type: mimeType };
+  }
+  if (mimeType.startsWith("audio/")) {
+    return { type: "audio", data: base64, mime_type: mimeType };
+  }
+  if (mimeType.startsWith("video/")) {
+    return { type: "video", data: base64, mime_type: mimeType };
+  }
+  if (mimeType === "application/pdf") {
+    return { type: "document", data: base64, mime_type: mimeType };
+  }
+  // text/* and other textual mimes — inline as text.
+  const decoded = Buffer.from(base64, "base64").toString("utf-8");
+  const label = filenameHint ? `Attached file: ${filenameHint} (${mimeType})` : `Attached file (${mimeType})`;
+  return { type: "text", text: `[${label}]\n${decoded}\n[End of attached file]` };
+}
+
 export class GeminiDeepResearchProvider implements DeepResearchProvider {
   private client: GoogleGenAI;
 
@@ -60,7 +90,7 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       attachments = [],
       previousInteractionId,
       mcpServers = [],
-      fileSearchStoreIds = [],
+      fileSearchStoreNames = [],
       outputDir,
       timeoutMs = DEFAULT_TIMEOUT_MS,
       pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -94,9 +124,15 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       attachments,
       previousInteractionId,
       mcpServers,
-      fileSearchStoreIds,
+      fileSearchStoreNames,
     });
     logger.info("Deep research started", { interactionId, model });
+
+    // On the first turn of a collaborative_planning interaction, the API
+    // completes with the research plan as the response body. Treat that as
+    // our "requires_action" status so callers know to resume with
+    // previous_interaction_id, not consume the plan as a final report.
+    const isPlanTurn = collaborativePlanning && !previousInteractionId;
 
     const result = await this.pollForCompletion(
       interactionId,
@@ -104,7 +140,8 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       timeoutMs,
       pollIntervalMs,
       startTime,
-      outputDir
+      outputDir,
+      isPlanTurn
     );
 
     const durationMs = Date.now() - startTime;
@@ -137,15 +174,25 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     attachments: NonNullable<DeepResearchOptions["attachments"]>;
     previousInteractionId?: string;
     mcpServers: McpServerConfig[];
-    fileSearchStoreIds: string[];
+    fileSearchStoreNames: string[];
   }): Promise<string> {
     const agentId = RESEARCH_MODEL_IDS[opts.model];
+    if (!agentId) {
+      throw new Error(
+        `VALIDATION_ERROR: Unknown research model "${opts.model}". Supported: ${Object.keys(RESEARCH_MODEL_IDS).join(", ")}`
+      );
+    }
 
-    // Build input: string when no attachments, otherwise a Content object.
+    // Build input as a typed-content array. The Interactions API uses a
+    // discriminated union per content part: { type: "text"|"image"|"document"|
+    // "audio"|"video", ... }. String input also works when no attachments.
     let input: any = opts.query;
     if (opts.attachments.length > 0) {
-      const parts = await buildInlineAttachments(opts.attachments);
-      input = [{ role: "user", parts: [...parts, { text: opts.query }] }];
+      const rawParts = await buildInlineAttachments(opts.attachments);
+      const typedParts = rawParts.map((p) =>
+        toInteractionContent(p.inlineData.mimeType, p.inlineData.data, p.filename)
+      );
+      input = [{ type: "text", text: opts.query }, ...typedParts];
     }
 
     // Build tools array, filtering web tools when disableWeb is set.
@@ -153,23 +200,24 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       ? opts.tools.filter((t) => !WEB_TOOLS.includes(t))
       : opts.tools;
 
+    // Each tool entry is a discriminated union: { type: "<name>", ...config }.
     const toolsArray: any[] = [];
     for (const tool of activeTools) {
-      if (tool === "google_search") toolsArray.push({ google_search: {} });
-      else if (tool === "url_context") toolsArray.push({ url_context: {} });
-      else if (tool === "code_execution") toolsArray.push({ code_execution: {} });
+      if (tool === "google_search") toolsArray.push({ type: "google_search" });
+      else if (tool === "url_context") toolsArray.push({ type: "url_context" });
+      else if (tool === "code_execution") toolsArray.push({ type: "code_execution" });
       else if (tool === "file_search") {
-        const fileSearch: any = {};
-        if (opts.fileSearchStoreIds.length > 0) {
-          fileSearch.file_search_store_ids = opts.fileSearchStoreIds;
+        const entry: any = { type: "file_search" };
+        if (opts.fileSearchStoreNames.length > 0) {
+          entry.file_search_store_names = opts.fileSearchStoreNames;
         }
-        toolsArray.push({ file_search: fileSearch });
+        toolsArray.push(entry);
       }
     }
     for (const server of opts.mcpServers) {
-      const mcp: any = { url: server.url };
-      if (server.headers) mcp.headers = server.headers;
-      toolsArray.push({ mcp_server: mcp });
+      const entry: any = { type: "mcp_server", name: server.name, url: server.url };
+      if (server.headers) entry.headers = server.headers;
+      toolsArray.push(entry);
     }
 
     const agentConfig: any = {
@@ -247,7 +295,8 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     timeoutMs: number,
     pollIntervalMs: number,
     startTime: number,
-    outputDir?: string
+    outputDir?: string,
+    isPlanTurn: boolean = false
   ): Promise<{
     text: string;
     status: "completed" | "failed" | "requires_action";
@@ -290,11 +339,16 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
           throw new Error("API_ERROR: Research completed but no output text or images found");
         }
 
+        // First turn of a collaborative-planning interaction completes with the
+        // plan itself — re-surface as requires_action so callers know to resume.
+        if (isPlanTurn) {
+          return { text, status: "requires_action", model, plan: text };
+        }
         return { text, status: "completed", model, images };
       }
 
-      // Collaborative planning pauses at `requires_action` with the plan in outputs.
-      // Surface the plan to the caller so they can continue with previousInteractionId.
+      // `requires_action` is used for other agent types (function calling);
+      // also surface any text content in case Deep Research ever uses it too.
       if (interaction.status === "requires_action") {
         const text = this.extractText(interaction.outputs);
         return {
@@ -313,7 +367,16 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         throw new Error("RESEARCH_CANCELLED: Research was cancelled");
       }
 
-      await this.sleep(pollIntervalMs);
+      if (interaction.status === "in_progress") {
+        await this.sleep(pollIntervalMs);
+        continue;
+      }
+
+      // Unknown status — fail hard so we learn and can fix.
+      throw new Error(
+        `API_ERROR: Unrecognized interaction status "${interaction.status}" for ${interactionId}. ` +
+          `Full interaction: ${JSON.stringify(interaction).slice(0, 500)}`
+      );
     }
   }
 
@@ -329,8 +392,15 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   }
 
   /**
-   * Extract any inline images (infographics/charts) from outputs and, if an
-   * output directory is provided, write them to disk. Returns image descriptors.
+   * Extract any inline images (infographics/charts) from outputs and write
+   * them to outputDir. Fails hard on any unrecognized non-text output so we
+   * learn the real response shape rather than silently dropping data.
+   *
+   * The Interactions API returns each output as a typed content variant:
+   *   TextContent:  { type: "text", text, annotations? }
+   *   ImageContent: { type: "image", data?, mime_type?, uri?, resolution? }
+   *   DocumentContent / AudioContent / VideoContent: same shape
+   *   ToolCallContent / ToolResultContent / FileSearchCallContent / etc.
    */
   private extractImages(
     outputs: Array<any> | undefined,
@@ -338,54 +408,57 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     outputDir?: string
   ): ResearchImage[] | undefined {
     if (!outputs) return undefined;
-    const images: ResearchImage[] = [];
 
-    // Images may appear either as top-level {type: "image", image: {data, mime_type}}
-    // outputs or as parts nested inside content outputs. Handle both.
     const candidates: Array<{ data: string; mimeType: string }> = [];
 
+    // Output types we know exist but that don't carry image data; skip silently.
+    const NON_IMAGE_KNOWN_TYPES = new Set([
+      "text",
+      "google_search_call",
+      "url_context_call",
+      "code_execution_call",
+      "file_search_call",
+      "file_search_result",
+      "mcp_server_call",
+      "tool_call",
+      "tool_result",
+      "reasoning",
+      "thought",
+    ]);
+
     for (const output of outputs) {
-      if (output.type === "image" && output.image?.data) {
+      const type = output.type;
+      if (NON_IMAGE_KNOWN_TYPES.has(type)) continue;
+
+      if (type === "image" && output.data) {
         candidates.push({
-          data: output.image.data,
-          mimeType: output.image.mime_type || output.image.mimeType || "image/png",
+          data: output.data,
+          mimeType: output.mime_type || "image/png",
         });
-      } else if (output.type === "content" && Array.isArray(output.parts)) {
-        for (const part of output.parts) {
-          const inline = part.inlineData || part.inline_data;
-          if (inline?.data) {
-            candidates.push({
-              data: inline.data,
-              mimeType: inline.mimeType || inline.mime_type || "image/png",
-            });
-          }
-        }
-      } else if (output.inlineData || output.inline_data) {
-        const inline = output.inlineData || output.inline_data;
-        if (inline.data) {
-          candidates.push({
-            data: inline.data,
-            mimeType: inline.mimeType || inline.mime_type || "image/png",
-          });
-        }
+        continue;
       }
+
+      // Unknown type — fail hard so we learn what it is.
+      throw new Error(
+        `API_ERROR: Unrecognized research output (type="${type}", keys=${Object.keys(output).join(",")}): ` +
+          `${JSON.stringify(output).slice(0, 400)}`
+      );
     }
 
     if (candidates.length === 0) return undefined;
 
     if (!outputDir) {
-      // Without an output directory we can't materialize the images; log and skip.
-      logger.info("Research returned inline images but no output_dir was provided", {
-        interactionId,
-        imageCount: candidates.length,
-      });
-      return undefined;
+      throw new Error(
+        `API_ERROR: Research returned ${candidates.length} inline image(s) but no output_dir was set. ` +
+          `Pass output_dir to save them, or set visualization: "off" to suppress image output.`
+      );
     }
 
     if (!existsSync(outputDir)) {
       mkdirSync(outputDir, { recursive: true });
     }
 
+    const images: ResearchImage[] = [];
     for (let i = 0; i < candidates.length; i++) {
       const { data, mimeType } = candidates[i];
       const ext = mimeType.split("/")[1]?.split("+")[0] || "png";

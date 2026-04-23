@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { extname } from "path";
+import { basename, extname } from "path";
 import type { Attachment } from "./types.js";
 import { SUPPORTED_MIME_TYPES } from "./types.js";
 import { logger } from "./logger.js";
@@ -16,6 +16,9 @@ export interface InlineDataPart {
     mimeType: string;
     data: string;
   };
+  // Filename hint, preserved so consumers that inline text attachments can
+  // label them clearly. Not propagated into the generateContent request.
+  filename?: string;
 }
 
 function getMimeType(filePath: string): string {
@@ -89,7 +92,9 @@ export async function buildInlineAttachments(
       logger.debugLog("Added URL attachment", { url: attachment.url, mimeType });
     }
 
-    parts.push({ inlineData: { mimeType: mimeType!, data: base64Data } });
+    const filename =
+      attachment.filename || (attachment.path ? basename(attachment.path) : undefined);
+    parts.push({ inlineData: { mimeType: mimeType!, data: base64Data }, filename });
   }
 
   return parts;

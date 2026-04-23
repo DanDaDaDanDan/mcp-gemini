@@ -118,8 +118,8 @@ Autonomous research agent (Gemini 3.1 Pro) that searches the web, analyzes sourc
 | `collaborative_planning` | boolean | | Pause after proposing a plan; continue with `previous_interaction_id` |
 | `tools` | string[] | | Subset of `google_search`, `url_context`, `code_execution`, `file_search` |
 | `disable_web` | boolean | | Strip web tools for proprietary-only research |
-| `file_search_store_ids` | string[] | | File Search store IDs when `file_search` is enabled |
-| `mcp_servers` | object[] | | Remote MCP servers (`{url, headers?}`) the agent may call as tools |
+| `file_search_store_names` | string[] | | File Search store resource names (e.g. `fileSearchStores/my-store-123`) |
+| `mcp_servers` | object[] | | Remote MCP servers (`{name, url, headers?}`) the agent may call as tools |
 | `attachments` | object[] | | Multimodal inputs (PDFs, CSVs, images, audio, video, text) |
 | `previous_interaction_id` | string | | Continue a prior interaction (e.g., after plan review) |
 | `output_dir` | string | | Directory to save inline-generated charts/infographics |

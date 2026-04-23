@@ -262,27 +262,30 @@ const TOOLS = [
             "against file_search stores or MCP servers.",
           default: false,
         },
-        file_search_store_ids: {
+        file_search_store_names: {
           type: "array",
           items: { type: "string" },
-          description: "File Search store IDs to search when 'file_search' is enabled.",
+          description:
+            "File Search store resource names (e.g. 'fileSearchStores/my-store-123') to search " +
+            "when 'file_search' is enabled.",
         },
         mcp_servers: {
           type: "array",
           description:
-            "Remote MCP servers the agent may call as tools during research. Each needs a URL and " +
-            "optional auth headers.",
+            "Remote MCP servers the agent may call as tools during research. Each needs a name, a " +
+            "URL, and optional auth headers / allowed_tools list.",
           items: {
             type: "object",
             properties: {
-              url: { type: "string", description: "MCP server URL" },
+              name: { type: "string", description: "Short label for this MCP server" },
+              url: { type: "string", description: "MCP server URL (e.g. https://api.example.com/mcp)" },
               headers: {
                 type: "object",
                 additionalProperties: { type: "string" },
                 description: "Optional HTTP headers (e.g., Authorization)",
               },
             },
-            required: ["url"],
+            required: ["name", "url"],
           },
         },
         attachments: {
@@ -623,7 +626,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       collaborative_planning: collaborativePlanning,
       tools,
       disable_web: disableWeb,
-      file_search_store_ids: fileSearchStoreIds,
+      file_search_store_names: fileSearchStoreNames,
       mcp_servers: mcpServers,
       attachments,
       previous_interaction_id: previousInteractionId,
@@ -637,8 +640,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       collaborative_planning?: boolean;
       tools?: Array<"google_search" | "url_context" | "code_execution" | "file_search">;
       disable_web?: boolean;
-      file_search_store_ids?: string[];
-      mcp_servers?: Array<{ url: string; headers?: Record<string, string> }>;
+      file_search_store_names?: string[];
+      mcp_servers?: Array<{ name: string; url: string; headers?: Record<string, string> }>;
       attachments?: Array<{ path?: string; data?: string; url?: string; media_type?: string; filename?: string }>;
       previous_interaction_id?: string;
       output_dir?: string;
@@ -690,7 +693,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         collaborativePlanning,
         tools,
         disableWeb,
-        fileSearchStoreIds,
+        fileSearchStoreNames,
         mcpServers,
         attachments,
         previousInteractionId,

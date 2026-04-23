@@ -183,48 +183,72 @@ use the `@google/genai` SDK's native interactions API. Two variants:
 ```typescript
 // Start research
 const interaction = await client.interactions.create({
-  input: "research query",                     // or Content[] with attachments
+  // string | typed Content[] | Turn[] | messages-like [{role, content}]
+  input: "research query",
   agent: "deep-research-max-preview-04-2026",
   background: true,
   agent_config: {
     type: "deep-research",                     // required
     thinking_summaries: "auto",                // "auto" | "none"
-    visualization: "auto",                     // "auto" | "off" — inline charts/infographics
-    collaborative_planning: false,             // pause for plan review before execution
+    visualization: "auto",                     // "auto" | "off"
+    collaborative_planning: false,             // propose plan before execution
   },
+  // Each tool is a discriminated union: { type: "<name>", ...config }.
   tools: [
-    { google_search: {} },
-    { url_context: {} },
-    // { code_execution: {} },
-    // { file_search: { file_search_store_ids: [...] } },
-    // { mcp_server: { url: "https://...", headers: {...} } },
+    { type: "google_search" },
+    { type: "url_context" },
+    // { type: "code_execution" },
+    // { type: "file_search", file_search_store_names: ["fileSearchStores/..."] },
+    // { type: "mcp_server", name: "label", url: "https://...", headers: {...} },
   ],
-  // previous_interaction_id: "...",           // continue a prior interaction
+  // previous_interaction_id: "...",
 });
+```
 
+**Shape gotchas learned the hard way:**
+- **Tools need a `type` discriminator**, not a nested key. `{ google_search: {} }`
+  is rejected; `{ type: "google_search" }` is correct.
+- **Content parts use typed variants** (`{ type, data, mime_type }`), not
+  `inline_data` wrappers. Valid content types: `text`, `image`, `document`,
+  `audio`, `video`.
+- **`DocumentContent` only accepts `application/pdf`** — text/markdown/json
+  attachments must be inlined into a text part (our provider does this).
+- **`mcp_server` requires both `name` and `url`** at the top level of the tool
+  entry; `headers` is optional.
+- **`file_search` uses `file_search_store_names`** (resource names like
+  `fileSearchStores/my-store-123`), not IDs.
+
+```typescript
 // Poll for completion
 const result = await client.interactions.get(interaction.id);
-// result.status: "in_progress" | "completed" | "failed" | "cancelled" | "requires_action"
-// result.outputs: Array<TextContent | ImageContent | ...>
+// status: "in_progress" | "completed" | "failed" | "cancelled" | "requires_action"
+// outputs: Array<TextContent | ImageContent | tool-call content | ...>
 
 // Cancel / delete
 await client.interactions.cancel(interaction.id);
 await client.interactions.delete(interaction.id);
 ```
 
-**Key points:**
-- Long-running: typically 5-30 minutes (deep-research), up to 60 minutes (max)
-- Async polling: start task, poll until `status` is `completed`, `failed`, or `cancelled`
-- `requires_action` status is how collaborative planning surfaces the proposed
-  plan — resume by calling `interactions.create` again with `previous_interaction_id`
-  set and the user's refinements as `input`
-- Output text extracted from `outputs` where `output.type === "text"`; inline
-  images (infographics/charts) appear as image outputs or inline-data parts
-- Input supports text, images, PDFs, CSVs, audio, and video via Content parts
-- `disable_web` in our MCP is a convenience that strips `google_search` +
-  `url_context` for proprietary-only research against file stores or MCP servers
-- Streaming supported via `stream: true` (returns SSE events) — not exposed
-  through this MCP since MCP is request/response
+**Collaborative planning flow (observed):** with `collaborative_planning: true`
+the first turn completes with `status: "completed"` and the plan as the
+response body (~10-30s). Our provider re-surfaces this as
+`status: "requires_action"` so callers know to resume by calling
+`deep_research` again with the user's refinements as `query` and the returned
+`interactionId` as `previous_interaction_id`. That second turn executes the
+actual research (5-30+ min).
+
+**Output extraction:** images arrive as `{ type: "image", data, mime_type }`
+outputs; text as `{ type: "text", text, annotations? }`. Tool-call and
+tool-result content types (`google_search_call`, `file_search_result`, etc.)
+are skipped during image extraction. Any unrecognized output type fails hard
+with the JSON dumped into the error message — we don't silently drop data.
+
+**Other notes:**
+- Long-running: typically 5-30 min for `deep-research`, up to 60 min for max
+- `disable_web` in our MCP strips `google_search` + `url_context` for
+  proprietary-only research against file stores or MCP servers
+- Streaming supported via `stream: true` (SSE) — not exposed through this
+  MCP since MCP is request/response
 
 ## Tools
 
@@ -262,8 +286,8 @@ await client.interactions.delete(interaction.id);
   tools?: Array<"google_search" | "url_context" | "code_execution" | "file_search">;
                                              // Default: ["google_search", "url_context"]
   disable_web?: boolean;                     // Default: false — strip web tools
-  file_search_store_ids?: string[];          // Required if "file_search" in tools
-  mcp_servers?: Array<{ url: string; headers?: Record<string, string> }>;
+  file_search_store_names?: string[];        // e.g. ["fileSearchStores/my-store-123"]
+  mcp_servers?: Array<{ name: string; url: string; headers?: Record<string, string> }>;
   attachments?: Attachment[];                // PDFs, CSVs, images, audio, video, text
   previous_interaction_id?: string;          // Continue after plan review / prior run
   output_dir?: string;                       // Save inline-generated images here

@@ -93,6 +93,7 @@ export type ResearchTool =
 
 // Remote MCP server descriptor for Deep Research's `mcp_server` tool
 export interface McpServerConfig {
+  name: string;
   url: string;
   headers?: Record<string, string>;
 }
@@ -115,7 +116,8 @@ export interface DeepResearchOptions {
   attachments?: Attachment[];
   previousInteractionId?: string;
   mcpServers?: McpServerConfig[];
-  fileSearchStoreIds?: string[];
+  // File Search store resource names, e.g. "fileSearchStores/my-store-123"
+  fileSearchStoreNames?: string[];
   outputDir?: string; // Where to save any inline-generated images
   timeoutMs?: number; // Max time to wait for research completion
   pollIntervalMs?: number; // How often to check status

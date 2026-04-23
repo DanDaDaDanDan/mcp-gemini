@@ -25,3 +25,11 @@ Thumbs.db
 # Test coverage
 coverage/
 tmpclaude-*-cwd
+
+# Local test harnesses + output
+test-live.mjs
+test-shapes.mjs
+test-shapes2.mjs
+test-shapes3.mjs
+test-provider.mjs
+test-output/
