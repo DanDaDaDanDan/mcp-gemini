@@ -713,6 +713,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           durationMs: result.durationMs,
           durationMinutes: Math.round((result.durationMs / 1000 / 60) * 10) / 10,
           images: result.images,
+          plan: result.plan,
         },
       };
     } catch (error: any) {
