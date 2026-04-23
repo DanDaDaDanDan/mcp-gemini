@@ -84,11 +84,41 @@ export interface ImageGenerateOptions {
   aspectRatio?: string; // e.g., "16:9", "1:1", "4:3"
 }
 
+// Deep Research tool types that can be enabled for a run
+export type ResearchTool =
+  | "google_search"
+  | "url_context"
+  | "code_execution"
+  | "file_search";
+
+// Remote MCP server descriptor for Deep Research's `mcp_server` tool
+export interface McpServerConfig {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+// Generated image returned alongside a research report (infographic/chart)
+export interface ResearchImage {
+  path: string;
+  mimeType: string;
+}
+
 // Deep Research options
 export interface DeepResearchOptions {
   query: string;
-  timeoutMs?: number; // Max time to wait for research completion (default: 30 min)
-  pollIntervalMs?: number; // How often to check status (default: 10 sec)
+  model?: SupportedResearchModel;
+  visualization?: "auto" | "off";
+  thinkingSummaries?: "auto" | "none";
+  collaborativePlanning?: boolean;
+  tools?: ResearchTool[];
+  disableWeb?: boolean;
+  attachments?: Attachment[];
+  previousInteractionId?: string;
+  mcpServers?: McpServerConfig[];
+  fileSearchStoreIds?: string[];
+  outputDir?: string; // Where to save any inline-generated images
+  timeoutMs?: number; // Max time to wait for research completion
+  pollIntervalMs?: number; // How often to check status
 }
 
 // Deep Research result
@@ -96,8 +126,10 @@ export interface DeepResearchResult {
   text: string;
   model: string;
   interactionId: string;
-  status: "completed" | "failed";
+  status: "completed" | "failed" | "requires_action" | "in_progress";
   durationMs: number;
+  images?: ResearchImage[];
+  plan?: string; // Populated when status === "requires_action" (collaborative planning pause)
 }
 
 // ============================================================================
@@ -162,7 +194,8 @@ export interface ImageProvider {
 
 export interface DeepResearchProvider {
   research(options: DeepResearchOptions): Promise<DeepResearchResult>;
-  getModelInfo(): ModelInfo;
+  checkResearch(interactionId: string, outputDir?: string): Promise<DeepResearchResult>;
+  getModelInfo(model?: SupportedResearchModel): ModelInfo;
 }
 
 // ============================================================================
@@ -172,9 +205,11 @@ export interface DeepResearchProvider {
 // Supported models
 export const SUPPORTED_TEXT_MODELS = ["gemini-3.1-pro", "gemini-3-pro", "gemini-3-flash"] as const;
 export const SUPPORTED_IMAGE_MODELS = ["nano-banana", "nano-banana-pro"] as const;
+export const SUPPORTED_RESEARCH_MODELS = ["deep-research", "deep-research-max"] as const;
 
 export type SupportedTextModel = (typeof SUPPORTED_TEXT_MODELS)[number];
 export type SupportedImageModel = (typeof SUPPORTED_IMAGE_MODELS)[number];
+export type SupportedResearchModel = (typeof SUPPORTED_RESEARCH_MODELS)[number];
 
 export function isSupportedTextModel(model: string): model is SupportedTextModel {
   return SUPPORTED_TEXT_MODELS.includes(model as SupportedTextModel);
@@ -182,6 +217,10 @@ export function isSupportedTextModel(model: string): model is SupportedTextModel
 
 export function isSupportedImageModel(model: string): model is SupportedImageModel {
   return SUPPORTED_IMAGE_MODELS.includes(model as SupportedImageModel);
+}
+
+export function isSupportedResearchModel(model: string): model is SupportedResearchModel {
+  return SUPPORTED_RESEARCH_MODELS.includes(model as SupportedResearchModel);
 }
 
 // API model IDs
@@ -194,7 +233,16 @@ export const TEXT_MODEL_IDS: Record<SupportedTextModel, string> = {
 
 export const DEFAULT_TEXT_MODEL: SupportedTextModel = "gemini-3.1-pro";
 
-export const DEEP_RESEARCH_AGENT_ID = "deep-research-pro-preview-12-2025";
+// Deep Research agent IDs
+// See: https://ai.google.dev/gemini-api/docs/deep-research
+export const RESEARCH_MODEL_IDS: Record<SupportedResearchModel, string> = {
+  "deep-research": "deep-research-preview-04-2026",
+  "deep-research-max": "deep-research-max-preview-04-2026",
+} as const;
+
+// Default to Max since our MCP flow already polls asynchronously and users
+// are reaching for Deep Research when they want the highest-quality report.
+export const DEFAULT_RESEARCH_MODEL: SupportedResearchModel = "deep-research-max";
 
 // Thinking levels supported by each model
 // 3.1 Pro: low/medium/high; 3 Pro: low/high; Flash: all four levels

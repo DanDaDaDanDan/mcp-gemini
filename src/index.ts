@@ -36,8 +36,10 @@ import { GeminiImageProvider } from "./providers/gemini-image.js";
 import { GeminiDeepResearchProvider } from "./providers/deep-research.js";
 import {
   isSupportedImageModel,
+  isSupportedResearchModel,
   isSupportedTextModel,
   SUPPORTED_IMAGE_MODELS,
+  SUPPORTED_RESEARCH_MODELS,
   SUPPORTED_TEXT_MODELS,
 } from "./types.js";
 import { logger } from "./logger.js";
@@ -199,22 +201,119 @@ const TOOLS = [
   {
     name: "deep_research",
     description:
-      "Perform autonomous web research using Google's Deep Research agent. " +
-      "The agent searches the web, analyzes multiple sources, and produces comprehensive research reports. " +
-      "This is a long-running operation that typically takes 5-60 minutes to complete. " +
-      "If it times out, use check_research with the returned interaction_id to retrieve results.",
+      "Perform autonomous web research using Google's Deep Research agents (Gemini 3.1 Pro). " +
+      "The agent searches the web, analyzes sources, and produces comprehensive cited reports with " +
+      "optional inline charts and infographics. Long-running (typically 5-60 minutes). If it times out, " +
+      "use check_research with the returned interaction_id. " +
+      "Supports file attachments, remote MCP servers, code execution, file search, and collaborative " +
+      "planning (review the plan before execution, then continue with previous_interaction_id).",
     inputSchema: {
       type: "object" as const,
       properties: {
         query: {
           type: "string",
           description:
-            "The research question or topic to investigate. Be specific and detailed for best results.",
+            "The research question or topic to investigate. Be specific and detailed for best results. " +
+            "When continuing a collaborative_planning session, pass refinements here.",
+        },
+        model: {
+          type: "string",
+          enum: [...SUPPORTED_RESEARCH_MODELS],
+          description:
+            "'deep-research-max' (default, most comprehensive, extended test-time compute) or " +
+            "'deep-research' (faster, lower cost, for shorter investigations).",
+          default: "deep-research-max",
+        },
+        visualization: {
+          type: "string",
+          enum: ["auto", "off"],
+          description:
+            "Whether to generate inline charts and infographics (HTML + images). Default: auto.",
+          default: "auto",
+        },
+        thinking_summaries: {
+          type: "string",
+          enum: ["auto", "none"],
+          description: "Include intermediate reasoning summaries in the output. Default: auto.",
+          default: "auto",
+        },
+        collaborative_planning: {
+          type: "boolean",
+          description:
+            "When true, the agent pauses after producing a research plan (status=requires_action). " +
+            "Call deep_research again with your refinements as 'query' and previous_interaction_id " +
+            "set to the returned interaction_id to resume execution.",
+          default: false,
+        },
+        tools: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["google_search", "url_context", "code_execution", "file_search"],
+          },
+          description:
+            "Which built-in tools the agent may use. Default: ['google_search', 'url_context']. " +
+            "'file_search' requires file_search_store_ids.",
+        },
+        disable_web: {
+          type: "boolean",
+          description:
+            "If true, strips google_search and url_context — useful for proprietary-only research " +
+            "against file_search stores or MCP servers.",
+          default: false,
+        },
+        file_search_store_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "File Search store IDs to search when 'file_search' is enabled.",
+        },
+        mcp_servers: {
+          type: "array",
+          description:
+            "Remote MCP servers the agent may call as tools during research. Each needs a URL and " +
+            "optional auth headers.",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "MCP server URL" },
+              headers: {
+                type: "object",
+                additionalProperties: { type: "string" },
+                description: "Optional HTTP headers (e.g., Authorization)",
+              },
+            },
+            required: ["url"],
+          },
+        },
+        attachments: {
+          type: "array",
+          description:
+            "File attachments providing context (PDFs, CSVs, images, audio, video, text). Each must " +
+            "provide exactly one of: 'path', 'data' (base64), or 'url'.",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Local file path" },
+              data: { type: "string", description: "Base64-encoded content (raw or data URI)" },
+              url: { type: "string", description: "URL to fetch and inline" },
+              media_type: { type: "string", description: "MIME type (required with data/url)" },
+              filename: { type: "string", description: "Optional filename hint" },
+            },
+          },
+        },
+        previous_interaction_id: {
+          type: "string",
+          description:
+            "Continue a prior research interaction (e.g., after reviewing a collaborative-planning plan).",
+        },
+        output_dir: {
+          type: "string",
+          description:
+            "Directory to save inline-generated charts/infographics. If omitted, images are discarded.",
         },
         timeout_minutes: {
           type: "number",
-          description:
-            "Maximum time to wait for research completion in minutes (default: 120, max: 120)",
+          description: "Maximum time to wait for completion (default: 120, max: 120).",
           default: 120,
           minimum: 5,
           maximum: 120,
@@ -227,13 +326,18 @@ const TOOLS = [
     name: "check_research",
     description:
       "Check the status of a running deep research task or retrieve results after a timeout. " +
-      "Use this with the interaction_id returned from deep_research if it times out or to poll for completion.",
+      "Use this with the interaction_id returned from deep_research.",
     inputSchema: {
       type: "object" as const,
       properties: {
         interaction_id: {
           type: "string",
           description: "The interaction ID returned from a previous deep_research call",
+        },
+        output_dir: {
+          type: "string",
+          description:
+            "Directory to save any inline-generated images if the task has now completed.",
         },
       },
       required: ["interaction_id"],
@@ -302,9 +406,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       available: true,
     });
 
-    // Add deep research model
+    // Add deep research models
     models.push({
-      ...deepResearchProvider.getModelInfo(),
+      ...deepResearchProvider.getModelInfo("deep-research-max"),
+      available: true,
+    });
+    models.push({
+      ...deepResearchProvider.getModelInfo("deep-research"),
       available: true,
     });
 
@@ -507,18 +615,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
 
   // Deep research tool
   if (name === "deep_research") {
-    const { query, timeout_minutes: timeoutMinutes } = args as {
+    const {
+      query,
+      model,
+      visualization,
+      thinking_summaries: thinkingSummaries,
+      collaborative_planning: collaborativePlanning,
+      tools,
+      disable_web: disableWeb,
+      file_search_store_ids: fileSearchStoreIds,
+      mcp_servers: mcpServers,
+      attachments,
+      previous_interaction_id: previousInteractionId,
+      output_dir: outputDir,
+      timeout_minutes: timeoutMinutes,
+    } = args as {
       query: string;
+      model?: string;
+      visualization?: "auto" | "off";
+      thinking_summaries?: "auto" | "none";
+      collaborative_planning?: boolean;
+      tools?: Array<"google_search" | "url_context" | "code_execution" | "file_search">;
+      disable_web?: boolean;
+      file_search_store_ids?: string[];
+      mcp_servers?: Array<{ url: string; headers?: Record<string, string> }>;
+      attachments?: Array<{ path?: string; data?: string; url?: string; media_type?: string; filename?: string }>;
+      previous_interaction_id?: string;
+      output_dir?: string;
       timeout_minutes?: number;
     };
 
     // Validate query
     if (!query || query.trim().length === 0) {
       return {
+        content: [{ type: "text", text: "Error: Query cannot be empty" }],
+        isError: true,
+      };
+    }
+
+    // Validate model if provided
+    if (model && !isSupportedResearchModel(model)) {
+      return {
         content: [
           {
             type: "text",
-            text: "Error: Query cannot be empty",
+            text: `Error: Unknown research model "${model}". Supported: ${SUPPORTED_RESEARCH_MODELS.join(", ")}`,
           },
         ],
         isError: true,
@@ -529,40 +670,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     const timeoutMs = (timeoutMinutes || 120) * 60 * 1000;
 
     try {
-      logger.info("Starting deep research", { queryLength: query.length, timeoutMinutes: timeoutMinutes || 120 });
+      logger.info("Starting deep research", {
+        model: model || "deep-research-max",
+        queryLength: query.length,
+        timeoutMinutes: timeoutMinutes || 120,
+        visualization: visualization || "auto",
+        collaborativePlanning: !!collaborativePlanning,
+        toolCount: tools?.length,
+        attachmentCount: attachments?.length,
+        mcpServerCount: mcpServers?.length,
+        hasPreviousInteraction: !!previousInteractionId,
+      });
 
       const result = await deepResearchProvider.research({
         query,
+        model: model as any,
+        visualization,
+        thinkingSummaries,
+        collaborativePlanning,
+        tools,
+        disableWeb,
+        fileSearchStoreIds,
+        mcpServers,
+        attachments,
+        previousInteractionId,
+        outputDir,
         timeoutMs,
       });
 
-      // Return successful result
+      // If the agent paused for plan review, surface the plan clearly.
+      const bodyText =
+        result.status === "requires_action" && result.plan
+          ? `**Research plan awaiting your review.** Call deep_research again with your refinements as 'query' and previous_interaction_id='${result.interactionId}' to continue.\n\n${result.plan}`
+          : result.text;
+
       return {
-        content: [
-          {
-            type: "text",
-            text: result.text,
-          },
-        ],
+        content: [{ type: "text", text: bodyText }],
         _meta: {
           model: result.model,
           interactionId: result.interactionId,
+          status: result.status,
           durationMs: result.durationMs,
-          durationMinutes: Math.round(result.durationMs / 1000 / 60 * 10) / 10,
+          durationMinutes: Math.round((result.durationMs / 1000 / 60) * 10) / 10,
+          images: result.images,
         },
       };
     } catch (error: any) {
       const errorMessage = error.message || "Unknown error during deep research";
       logger.error("Deep research failed", { error: errorMessage });
 
-      // Include interaction ID in timeout errors so user can check_research later
       return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${errorMessage}`,
-          },
-        ],
+        content: [{ type: "text", text: `Error: ${errorMessage}` }],
         isError: true,
       };
     }
@@ -570,8 +728,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
 
   // Check research status tool
   if (name === "check_research") {
-    const { interaction_id: interactionId } = args as {
+    const { interaction_id: interactionId, output_dir: outputDir } = args as {
       interaction_id: string;
+      output_dir?: string;
     };
 
     // Validate interaction ID
@@ -590,21 +749,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     try {
       logger.info("Checking research status", { interactionId });
 
-      const result = await deepResearchProvider.checkResearch(interactionId);
+      const result = await deepResearchProvider.checkResearch(interactionId, outputDir);
 
-      // Return result (could be completed, in_progress, or failed)
+      // Return result (could be completed, in_progress, requires_action, or failed)
       return {
-        content: [
-          {
-            type: "text",
-            text: result.text,
-          },
-        ],
+        content: [{ type: "text", text: result.text }],
         _meta: {
           model: result.model,
           interactionId: result.interactionId,
           status: result.status,
           durationMs: result.durationMs,
+          images: result.images,
+          plan: result.plan,
         },
       };
     } catch (error: any) {

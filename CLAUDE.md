@@ -27,7 +27,8 @@ The old SDK is deprecated (EOL August 31, 2025) and doesn't support:
 | gemini-3-flash | `gemini-3-flash-preview` | Text/Thinking (fast, balanced) |
 | nano-banana | `gemini-2.5-flash-image` | Image (fast) |
 | nano-banana-pro | `gemini-3-pro-image-preview` | Image (high-quality, 2K/4K) |
-| deep-research | `deep-research-pro-preview-12-2025` | Research (async) |
+| deep-research | `deep-research-preview-04-2026` | Research (fast, interactive) |
+| deep-research-max | `deep-research-max-preview-04-2026` | Research (comprehensive, async) |
 
 ### Model Comparison: Text Models
 
@@ -170,41 +171,60 @@ response.candidates[0].content.parts[].inlineData.mimeType
 
 ## Deep Research
 
-The Deep Research agent uses the `@google/genai` SDK's native interactions API:
+The Deep Research agents (April 2026 release — both built on Gemini 3.1 Pro)
+use the `@google/genai` SDK's native interactions API. Two variants:
+
+- **`deep-research`** (`deep-research-preview-04-2026`) — optimized for speed
+  and reduced cost; ideal for interactive UI surfaces.
+- **`deep-research-max`** (`deep-research-max-preview-04-2026`) — extended
+  test-time compute for maximum comprehensiveness; best for async/background
+  workflows. This is our default.
 
 ```typescript
 // Start research
 const interaction = await client.interactions.create({
-  input: "research query",
-  agent: "deep-research-pro-preview-12-2025",
+  input: "research query",                     // or Content[] with attachments
+  agent: "deep-research-max-preview-04-2026",
   background: true,
   agent_config: {
-    type: "deep-research",        // REQUIRED - must specify agent type
-    thinking_summaries: "auto"    // Optional - enables progress updates
+    type: "deep-research",                     // required
+    thinking_summaries: "auto",                // "auto" | "none"
+    visualization: "auto",                     // "auto" | "off" — inline charts/infographics
+    collaborative_planning: false,             // pause for plan review before execution
   },
+  tools: [
+    { google_search: {} },
+    { url_context: {} },
+    // { code_execution: {} },
+    // { file_search: { file_search_store_ids: [...] } },
+    // { mcp_server: { url: "https://...", headers: {...} } },
+  ],
+  // previous_interaction_id: "...",           // continue a prior interaction
 });
 
 // Poll for completion
 const result = await client.interactions.get(interaction.id);
 // result.status: "in_progress" | "completed" | "failed" | "cancelled" | "requires_action"
-// result.outputs: Array<TextContent | ...>
+// result.outputs: Array<TextContent | ImageContent | ...>
 
-// Cancel a running task
+// Cancel / delete
 await client.interactions.cancel(interaction.id);
-
-// Delete an interaction
 await client.interactions.delete(interaction.id);
 ```
 
 **Key points:**
-- Long-running: typically 5-30 minutes, max 60 minutes
+- Long-running: typically 5-30 minutes (deep-research), up to 60 minutes (max)
 - Async polling: start task, poll until `status` is `completed`, `failed`, or `cancelled`
-- Output text extracted from `outputs` array where `output.type === "text"`
-- SDK handles auth via API key passed at GoogleGenAI construction
-- Supports `previous_interaction_id` for follow-up queries
-- File support: Experimental - requires File Search stores (not inline files)
-- Audio inputs are NOT supported for Deep Research
-- Streaming supported via `stream: true` (returns SSE events)
+- `requires_action` status is how collaborative planning surfaces the proposed
+  plan — resume by calling `interactions.create` again with `previous_interaction_id`
+  set and the user's refinements as `input`
+- Output text extracted from `outputs` where `output.type === "text"`; inline
+  images (infographics/charts) appear as image outputs or inline-data parts
+- Input supports text, images, PDFs, CSVs, audio, and video via Content parts
+- `disable_web` in our MCP is a convenience that strips `google_search` +
+  `url_context` for proprietary-only research against file stores or MCP servers
+- Streaming supported via `stream: true` (returns SSE events) — not exposed
+  through this MCP since MCP is request/response
 
 ## Tools
 
@@ -212,7 +232,8 @@ await client.interactions.delete(interaction.id);
 |------|-------------|----------|
 | `generate_text` | Text generation with thinking and file attachments | gemini-3.1-pro (default), gemini-3-pro, gemini-3-flash |
 | `generate_image` | Image generation/editing | nano-banana (default), nano-banana-pro |
-| `deep_research` | Autonomous web research | deep-research |
+| `deep_research` | Autonomous web research with visualizations, MCP tools, and collaborative planning | deep-research-max (default), deep-research |
+| `check_research` | Poll status / retrieve results of a running research task | — |
 | `list_models` | List available models | Static |
 
 ### generate_text Parameters
@@ -228,6 +249,32 @@ await client.interactions.delete(interaction.id);
   attachments?: Attachment[];  // Multimodal file attachments (path, data, or URL)
 }
 ```
+
+### deep_research Parameters
+
+```typescript
+{
+  query: string;                             // Required
+  model?: "deep-research-max" | "deep-research";  // Default: deep-research-max
+  visualization?: "auto" | "off";            // Default: auto — inline charts/infographics
+  thinking_summaries?: "auto" | "none";      // Default: auto
+  collaborative_planning?: boolean;          // Default: false — pause for plan review
+  tools?: Array<"google_search" | "url_context" | "code_execution" | "file_search">;
+                                             // Default: ["google_search", "url_context"]
+  disable_web?: boolean;                     // Default: false — strip web tools
+  file_search_store_ids?: string[];          // Required if "file_search" in tools
+  mcp_servers?: Array<{ url: string; headers?: Record<string, string> }>;
+  attachments?: Attachment[];                // PDFs, CSVs, images, audio, video, text
+  previous_interaction_id?: string;          // Continue after plan review / prior run
+  output_dir?: string;                       // Save inline-generated images here
+  timeout_minutes?: number;                  // Default: 120
+}
+```
+
+Returns `{ text, _meta: { interactionId, status, model, images?, plan? } }`.
+When `status === "requires_action"`, the proposed plan is in both `text` and
+`_meta.plan`; resume by passing your refinements as `query` and setting
+`previous_interaction_id` to the returned `interactionId`.
 
 ## Error Categories
 

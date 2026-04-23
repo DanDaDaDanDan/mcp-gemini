@@ -2,17 +2,37 @@
  * Deep Research provider using Google's Deep Research Agent API
  *
  * Uses the @google/genai SDK's native interactions API (client.interactions).
- * The agent performs autonomous web research and returns comprehensive reports.
+ * Supports both "deep-research" (fast) and "deep-research-max" (comprehensive)
+ * agents introduced in April 2026, along with visualizations, collaborative
+ * planning, MCP servers, file search, code execution, and multimodal inputs.
  */
 
 import { GoogleGenAI } from "@google/genai";
-import type { DeepResearchOptions, DeepResearchResult, ModelInfo, DeepResearchProvider } from "../types.js";
-import { DEEP_RESEARCH_AGENT_ID } from "../types.js";
+import { mkdirSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
+import type {
+  DeepResearchOptions,
+  DeepResearchResult,
+  ModelInfo,
+  DeepResearchProvider,
+  SupportedResearchModel,
+  ResearchImage,
+  ResearchTool,
+  McpServerConfig,
+} from "../types.js";
+import {
+  RESEARCH_MODEL_IDS,
+  DEFAULT_RESEARCH_MODEL,
+} from "../types.js";
+import { buildInlineAttachments } from "../attachments.js";
 import { logger } from "../logger.js";
 
 // Default timeout: 120 minutes (research can take up to 60 min, most complete in ~20)
 const DEFAULT_TIMEOUT_MS = 120 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
+
+// Web tools that `disable_web: true` should strip
+const WEB_TOOLS: ResearchTool[] = ["google_search", "url_context"];
 
 export class GeminiDeepResearchProvider implements DeepResearchProvider {
   private client: GoogleGenAI;
@@ -22,15 +42,26 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       throw new Error("Gemini API key is required");
     }
     this.client = new GoogleGenAI({ apiKey });
-    logger.info("Deep Research provider initialized", { agent: DEEP_RESEARCH_AGENT_ID });
+    logger.info("Deep Research provider initialized", {
+      models: Object.keys(RESEARCH_MODEL_IDS),
+      defaultModel: DEFAULT_RESEARCH_MODEL,
+    });
   }
 
-  /**
-   * Start a deep research task and poll until completion
-   */
   async research(options: DeepResearchOptions): Promise<DeepResearchResult> {
     const {
       query,
+      model = DEFAULT_RESEARCH_MODEL,
+      visualization = "auto",
+      thinkingSummaries = "auto",
+      collaborativePlanning = false,
+      tools = ["google_search", "url_context"],
+      disableWeb = false,
+      attachments = [],
+      previousInteractionId,
+      mcpServers = [],
+      fileSearchStoreIds = [],
+      outputDir,
       timeoutMs = DEFAULT_TIMEOUT_MS,
       pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     } = options;
@@ -38,24 +69,51 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     const startTime = Date.now();
 
     logger.debugLog("Starting deep research", {
+      model,
       queryLength: query.length,
+      visualization,
+      thinkingSummaries,
+      collaborativePlanning,
+      tools,
+      disableWeb,
+      attachmentCount: attachments.length,
+      mcpServerCount: mcpServers.length,
+      hasPreviousInteraction: !!previousInteractionId,
       timeoutMs,
       pollIntervalMs,
     });
 
-    // Start the research task
-    const interactionId = await this.startResearch(query);
-    logger.info("Deep research started", { interactionId });
+    const interactionId = await this.startResearch({
+      query,
+      model,
+      visualization,
+      thinkingSummaries,
+      collaborativePlanning,
+      tools,
+      disableWeb,
+      attachments,
+      previousInteractionId,
+      mcpServers,
+      fileSearchStoreIds,
+    });
+    logger.info("Deep research started", { interactionId, model });
 
-    // Poll for completion
-    const result = await this.pollForCompletion(interactionId, timeoutMs, pollIntervalMs, startTime);
+    const result = await this.pollForCompletion(
+      interactionId,
+      model,
+      timeoutMs,
+      pollIntervalMs,
+      startTime,
+      outputDir
+    );
 
     const durationMs = Date.now() - startTime;
-    logger.info("Deep research completed", {
+    logger.info("Deep research settled", {
       interactionId,
       status: result.status,
       durationMs,
       resultLength: result.text.length,
+      imageCount: result.images?.length ?? 0,
     });
 
     return {
@@ -66,24 +124,84 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   }
 
   /**
-   * Start a new research interaction using the SDK
+   * Build the agent_config + tools array and call interactions.create.
    */
-  private async startResearch(query: string): Promise<string> {
+  private async startResearch(opts: {
+    query: string;
+    model: SupportedResearchModel;
+    visualization: "auto" | "off";
+    thinkingSummaries: "auto" | "none";
+    collaborativePlanning: boolean;
+    tools: ResearchTool[];
+    disableWeb: boolean;
+    attachments: NonNullable<DeepResearchOptions["attachments"]>;
+    previousInteractionId?: string;
+    mcpServers: McpServerConfig[];
+    fileSearchStoreIds: string[];
+  }): Promise<string> {
+    const agentId = RESEARCH_MODEL_IDS[opts.model];
+
+    // Build input: string when no attachments, otherwise a Content object.
+    let input: any = opts.query;
+    if (opts.attachments.length > 0) {
+      const parts = await buildInlineAttachments(opts.attachments);
+      input = [{ role: "user", parts: [...parts, { text: opts.query }] }];
+    }
+
+    // Build tools array, filtering web tools when disableWeb is set.
+    const activeTools = opts.disableWeb
+      ? opts.tools.filter((t) => !WEB_TOOLS.includes(t))
+      : opts.tools;
+
+    const toolsArray: any[] = [];
+    for (const tool of activeTools) {
+      if (tool === "google_search") toolsArray.push({ google_search: {} });
+      else if (tool === "url_context") toolsArray.push({ url_context: {} });
+      else if (tool === "code_execution") toolsArray.push({ code_execution: {} });
+      else if (tool === "file_search") {
+        const fileSearch: any = {};
+        if (opts.fileSearchStoreIds.length > 0) {
+          fileSearch.file_search_store_ids = opts.fileSearchStoreIds;
+        }
+        toolsArray.push({ file_search: fileSearch });
+      }
+    }
+    for (const server of opts.mcpServers) {
+      const mcp: any = { url: server.url };
+      if (server.headers) mcp.headers = server.headers;
+      toolsArray.push({ mcp_server: mcp });
+    }
+
+    const agentConfig: any = {
+      type: "deep-research",
+      thinking_summaries: opts.thinkingSummaries,
+      visualization: opts.visualization,
+    };
+    if (opts.collaborativePlanning) {
+      agentConfig.collaborative_planning = true;
+    }
+
+    const request: any = {
+      input,
+      agent: agentId,
+      background: true,
+      agent_config: agentConfig,
+    };
+    if (toolsArray.length > 0) request.tools = toolsArray;
+    if (opts.previousInteractionId) {
+      request.previous_interaction_id = opts.previousInteractionId;
+    }
+
     logger.debugLog("Deep research API request", {
-      agent: DEEP_RESEARCH_AGENT_ID,
-      queryPreview: query.substring(0, 200) + (query.length > 200 ? "..." : ""),
+      agent: agentId,
+      queryPreview: opts.query.substring(0, 200) + (opts.query.length > 200 ? "..." : ""),
+      toolCount: toolsArray.length,
+      agentConfig,
+      hasPreviousInteraction: !!opts.previousInteractionId,
     });
 
     try {
-      const interaction = await this.client.interactions.create({
-        input: query,
-        agent: DEEP_RESEARCH_AGENT_ID,
-        background: true,
-        agent_config: {
-          type: "deep-research",
-          thinking_summaries: "auto",
-        },
-      });
+      const interaction = await this.client.interactions.create(request);
 
       logger.debugLog("Deep research started successfully", {
         interactionId: interaction.id,
@@ -103,7 +221,12 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         errorStatus: error.status,
       });
 
-      if (error.status === 401 || error.status === 403 || message.includes("API_KEY_INVALID") || message.includes("API key")) {
+      if (
+        error.status === 401 ||
+        error.status === 403 ||
+        message.includes("API_KEY_INVALID") ||
+        message.includes("API key")
+      ) {
         throw new Error(`AUTH_ERROR: ${message}`);
       } else if (error.status === 429 || message.includes("rate") || message.includes("quota")) {
         throw new Error(`RATE_LIMIT: ${message}`);
@@ -116,14 +239,22 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   }
 
   /**
-   * Poll for research completion using the SDK
+   * Poll for research completion using the SDK.
    */
   private async pollForCompletion(
     interactionId: string,
+    model: SupportedResearchModel,
     timeoutMs: number,
     pollIntervalMs: number,
-    startTime: number
-  ): Promise<{ text: string; status: "completed" | "failed"; model: string }> {
+    startTime: number,
+    outputDir?: string
+  ): Promise<{
+    text: string;
+    status: "completed" | "failed" | "requires_action";
+    model: SupportedResearchModel;
+    images?: ResearchImage[];
+    plan?: string;
+  }> {
     while (true) {
       const elapsed = Date.now() - startTime;
 
@@ -138,7 +269,7 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       logger.debugLog("Polling research status", {
         interactionId,
         elapsedMs: elapsed,
-        elapsedMinutes: Math.round(elapsed / 1000 / 60 * 10) / 10,
+        elapsedMinutes: Math.round((elapsed / 1000 / 60) * 10) / 10,
       });
 
       const interaction = await this.client.interactions.get(interactionId);
@@ -153,15 +284,24 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
 
       if (interaction.status === "completed") {
         const text = this.extractText(interaction.outputs);
+        const images = this.extractImages(interaction.outputs, interactionId, outputDir);
 
-        if (!text) {
-          throw new Error("API_ERROR: Research completed but no output text found");
+        if (!text && (!images || images.length === 0)) {
+          throw new Error("API_ERROR: Research completed but no output text or images found");
         }
 
+        return { text, status: "completed", model, images };
+      }
+
+      // Collaborative planning pauses at `requires_action` with the plan in outputs.
+      // Surface the plan to the caller so they can continue with previousInteractionId.
+      if (interaction.status === "requires_action") {
+        const text = this.extractText(interaction.outputs);
         return {
           text,
-          status: "completed",
-          model: "deep-research",
+          status: "requires_action",
+          model,
+          plan: text,
         };
       }
 
@@ -178,7 +318,7 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
   }
 
   /**
-   * Extract text content from interaction outputs
+   * Extract text content from interaction outputs.
    */
   private extractText(outputs?: Array<any>): string {
     if (!outputs) return "";
@@ -188,15 +328,88 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
       .join("\n\n");
   }
 
+  /**
+   * Extract any inline images (infographics/charts) from outputs and, if an
+   * output directory is provided, write them to disk. Returns image descriptors.
+   */
+  private extractImages(
+    outputs: Array<any> | undefined,
+    interactionId: string,
+    outputDir?: string
+  ): ResearchImage[] | undefined {
+    if (!outputs) return undefined;
+    const images: ResearchImage[] = [];
+
+    // Images may appear either as top-level {type: "image", image: {data, mime_type}}
+    // outputs or as parts nested inside content outputs. Handle both.
+    const candidates: Array<{ data: string; mimeType: string }> = [];
+
+    for (const output of outputs) {
+      if (output.type === "image" && output.image?.data) {
+        candidates.push({
+          data: output.image.data,
+          mimeType: output.image.mime_type || output.image.mimeType || "image/png",
+        });
+      } else if (output.type === "content" && Array.isArray(output.parts)) {
+        for (const part of output.parts) {
+          const inline = part.inlineData || part.inline_data;
+          if (inline?.data) {
+            candidates.push({
+              data: inline.data,
+              mimeType: inline.mimeType || inline.mime_type || "image/png",
+            });
+          }
+        }
+      } else if (output.inlineData || output.inline_data) {
+        const inline = output.inlineData || output.inline_data;
+        if (inline.data) {
+          candidates.push({
+            data: inline.data,
+            mimeType: inline.mimeType || inline.mime_type || "image/png",
+          });
+        }
+      }
+    }
+
+    if (candidates.length === 0) return undefined;
+
+    if (!outputDir) {
+      // Without an output directory we can't materialize the images; log and skip.
+      logger.info("Research returned inline images but no output_dir was provided", {
+        interactionId,
+        imageCount: candidates.length,
+      });
+      return undefined;
+    }
+
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true });
+    }
+
+    for (let i = 0; i < candidates.length; i++) {
+      const { data, mimeType } = candidates[i];
+      const ext = mimeType.split("/")[1]?.split("+")[0] || "png";
+      const path = join(outputDir, `${interactionId}-${i + 1}.${ext}`);
+      writeFileSync(path, Buffer.from(data, "base64"));
+      images.push({ path, mimeType });
+      logger.debugLog("Saved research image", { path, mimeType });
+    }
+
+    return images;
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
-   * Check status of a running research task by interaction ID
-   * Can be used to resume/retrieve results after a timeout
+   * Check status of a running research task by interaction ID.
+   * Can be used to resume/retrieve results after a timeout.
    */
-  async checkResearch(interactionId: string): Promise<DeepResearchResult> {
+  async checkResearch(
+    interactionId: string,
+    outputDir?: string
+  ): Promise<DeepResearchResult> {
     const startTime = Date.now();
 
     logger.info("Checking research status", { interactionId });
@@ -209,19 +422,38 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         status: interaction.status,
       });
 
+      // We don't know the friendly model name from the interaction alone; the
+      // agent field on the interaction would tell us, but it's the API ID. Map
+      // back if we can, otherwise fall back to the default.
+      const model = this.resolveModelFromAgentId((interaction as any).agent) ?? DEFAULT_RESEARCH_MODEL;
+
       if (interaction.status === "completed") {
         const text = this.extractText(interaction.outputs);
+        const images = this.extractImages(interaction.outputs, interactionId, outputDir);
 
-        if (!text) {
-          throw new Error("API_ERROR: Research completed but no output text found");
+        if (!text && (!images || images.length === 0)) {
+          throw new Error("API_ERROR: Research completed but no output text or images found");
         }
 
         return {
           text,
           status: "completed",
-          model: "deep-research",
+          model,
           interactionId,
           durationMs: Date.now() - startTime,
+          images,
+        };
+      }
+
+      if (interaction.status === "requires_action") {
+        const text = this.extractText(interaction.outputs);
+        return {
+          text,
+          status: "requires_action",
+          model,
+          interactionId,
+          durationMs: Date.now() - startTime,
+          plan: text,
         };
       }
 
@@ -233,11 +465,11 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
         throw new Error("RESEARCH_CANCELLED: Research was cancelled");
       }
 
-      // Still in progress or requires_action
+      // Still in progress
       return {
         text: `Research still in progress. Status: ${interaction.status}. Check again later using interaction ID: ${interactionId}`,
-        status: "in_progress" as any,
-        model: "deep-research",
+        status: "in_progress",
+        model,
         interactionId,
         durationMs: Date.now() - startTime,
       };
@@ -255,15 +487,36 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     }
   }
 
-  getModelInfo(): ModelInfo {
-    return {
-      id: "deep-research",
-      name: "Deep Research Pro",
-      provider: "google",
-      type: "research",
-      description:
-        "AI research agent that autonomously searches the web, analyzes multiple sources, " +
-        "and produces comprehensive research reports. Takes 5-60 minutes to complete.",
+  private resolveModelFromAgentId(agentId?: string): SupportedResearchModel | undefined {
+    if (!agentId) return undefined;
+    for (const [friendly, api] of Object.entries(RESEARCH_MODEL_IDS)) {
+      if (api === agentId) return friendly as SupportedResearchModel;
+    }
+    return undefined;
+  }
+
+  getModelInfo(model: SupportedResearchModel = DEFAULT_RESEARCH_MODEL): ModelInfo {
+    const infos: Record<SupportedResearchModel, ModelInfo> = {
+      "deep-research": {
+        id: "deep-research",
+        name: "Gemini Deep Research",
+        provider: "google",
+        type: "research",
+        description:
+          "Fast autonomous research agent (Gemini 3.1 Pro) optimized for speed and reduced cost. " +
+          "Best for shorter, interactive research tasks.",
+      },
+      "deep-research-max": {
+        id: "deep-research-max",
+        name: "Gemini Deep Research Max",
+        provider: "google",
+        type: "research",
+        description:
+          "Comprehensive autonomous research agent (Gemini 3.1 Pro) with extended test-time compute. " +
+          "Produces thorough, deeply-cited reports with inline charts and infographics. " +
+          "Typically takes 10-60 minutes.",
+      },
     };
+    return infos[model];
   }
 }

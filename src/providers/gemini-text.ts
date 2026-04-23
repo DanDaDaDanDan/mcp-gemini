@@ -16,16 +16,14 @@ import type {
 import {
   TEXT_MODEL_IDS,
   DEFAULT_TEXT_MODEL,
-  SUPPORTED_MIME_TYPES,
   validateThinkingLevel,
 } from "../types.js";
+import { buildInlineAttachments } from "../attachments.js";
 import { FILE_TOOL_DEFINITIONS, executeFileTool } from "../file-tools.js";
 import { logger } from "../logger.js";
 import { withRetry, withTimeout } from "../retry.js";
 import { calculateTextCost } from "../pricing.js";
 import { costTracker } from "../cost-tracker.js";
-import { readFileSync, existsSync } from "fs";
-import { basename, extname } from "path";
 
 /**
  * Map user-facing thinking level strings to SDK enum values.
@@ -36,21 +34,6 @@ const THINKING_LEVEL_MAP: Record<ThinkingLevelOption, string> = {
   medium: ThinkingLevel.MEDIUM,
   high: ThinkingLevel.HIGH,
 };
-
-/**
- * Get MIME type for a file path. Throws if file type is not supported.
- */
-function getMimeType(filePath: string): string {
-  const ext = extname(filePath).toLowerCase();
-  const mimeType = SUPPORTED_MIME_TYPES[ext];
-  if (!mimeType) {
-    const supportedExts = Object.keys(SUPPORTED_MIME_TYPES).join(", ");
-    throw new Error(
-      `Unsupported file type "${ext}". Supported types: ${supportedExts}`
-    );
-  }
-  return mimeType;
-}
 
 // Default timeout for generation requests (120 minutes for extended thinking)
 const DEFAULT_TIMEOUT_MS = 120 * 60 * 1000;
@@ -109,64 +92,11 @@ export class GeminiTextProvider implements TextProvider {
     });
 
     // Build contents array for multimodal input
-    const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
-
-    // Add attachments if provided (images, audio, video, PDFs, text files)
-    for (let i = 0; i < attachments.length; i++) {
-      const attachment = attachments[i];
-      const sources = [attachment.path, attachment.data, attachment.url].filter(Boolean);
-      if (sources.length !== 1) {
-        throw new Error(
-          `VALIDATION_ERROR: Attachment ${i}: exactly one of 'path', 'data', or 'url' must be provided (got ${sources.length})`
-        );
-      }
-
-      let mimeType: string | undefined = attachment.media_type;
-      let base64Data: string;
-
-      if (attachment.path) {
-        if (!existsSync(attachment.path)) {
-          throw new Error(`File not found: ${attachment.path}`);
-        }
-        if (!mimeType) {
-          mimeType = getMimeType(attachment.path);
-        }
-        base64Data = readFileSync(attachment.path, { encoding: "base64" });
-        logger.debugLog("Added file attachment", { path: attachment.path, mimeType });
-      } else if (attachment.data) {
-        if (!mimeType) {
-          throw new Error(`VALIDATION_ERROR: Attachment ${i}: 'media_type' is required when using 'data'`);
-        }
-        // Handle both raw base64 and data URI formats
-        if (attachment.data.startsWith("data:")) {
-          const match = attachment.data.match(/^data:([^;]+);base64,(.+)$/);
-          if (!match) {
-            throw new Error(`VALIDATION_ERROR: Attachment ${i}: invalid data URI format`);
-          }
-          base64Data = match[2];
-        } else {
-          base64Data = attachment.data;
-        }
-        logger.debugLog("Added base64 attachment", { mimeType, dataLength: base64Data.length });
-      } else {
-        // URL — fetch and inline since Gemini requires inline data
-        if (!mimeType) {
-          throw new Error(`VALIDATION_ERROR: Attachment ${i}: 'media_type' is required when using 'url'`);
-        }
-        const response = await fetch(attachment.url!);
-        if (!response.ok) {
-          throw new Error(`VALIDATION_ERROR: Attachment ${i}: failed to fetch URL: ${response.status} ${response.statusText}`);
-        }
-        const buffer = Buffer.from(await response.arrayBuffer());
-        base64Data = buffer.toString("base64");
-        logger.debugLog("Added URL attachment", { url: attachment.url, mimeType });
-      }
-
-      contents.push({ inlineData: { mimeType: mimeType!, data: base64Data } });
-    }
-
-    // Add text prompt
-    contents.push({ text: textPrompt });
+    const attachmentParts = await buildInlineAttachments(attachments);
+    const contents: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      ...attachmentParts,
+      { text: textPrompt },
+    ];
 
     try {
       // Build config object for the new SDK

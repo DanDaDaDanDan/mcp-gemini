@@ -107,19 +107,34 @@ Use generate_image to create a sunset over mountains, save to /tmp/sunset.png
 
 ### deep_research
 
-Perform autonomous web research using Google's Deep Research agent. Returns comprehensive research reports.
+Autonomous research agent (Gemini 3.1 Pro) that searches the web, analyzes sources, and produces comprehensive cited reports with optional inline charts and infographics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | Research question or topic |
-| `timeout_minutes` | number | | Max wait time (default: 60, max: 60) |
+| `query` | string | Yes | Research question or refinement when continuing a plan |
+| `model` | string | | `deep-research-max` (default, comprehensive) or `deep-research` (fast) |
+| `visualization` | string | | `auto` (default) or `off` — inline charts/infographics |
+| `thinking_summaries` | string | | `auto` (default) or `none` |
+| `collaborative_planning` | boolean | | Pause after proposing a plan; continue with `previous_interaction_id` |
+| `tools` | string[] | | Subset of `google_search`, `url_context`, `code_execution`, `file_search` |
+| `disable_web` | boolean | | Strip web tools for proprietary-only research |
+| `file_search_store_ids` | string[] | | File Search store IDs when `file_search` is enabled |
+| `mcp_servers` | object[] | | Remote MCP servers (`{url, headers?}`) the agent may call as tools |
+| `attachments` | object[] | | Multimodal inputs (PDFs, CSVs, images, audio, video, text) |
+| `previous_interaction_id` | string | | Continue a prior interaction (e.g., after plan review) |
+| `output_dir` | string | | Directory to save inline-generated charts/infographics |
+| `timeout_minutes` | number | | Max wait time (default: 120, max: 120) |
 
-**Note:** This is a long-running operation that typically takes 5-30 minutes.
+**Note:** Long-running — typically 5-30 minutes for `deep-research`, up to 60 minutes for `deep-research-max`. If it times out, use `check_research` with the returned `interactionId` to retrieve results.
 
 **Example:**
 ```
-Use deep_research to investigate recent developments in quantum computing
+Use deep_research to investigate recent developments in quantum computing, save any charts to /tmp/research-images
 ```
+
+### check_research
+
+Check the status of a running deep_research task or retrieve results after a timeout. Pass the `interaction_id` returned from `deep_research`, plus an optional `output_dir` for any inline images.
 
 ### list_models
 
@@ -141,7 +156,8 @@ List available models and their capabilities.
 | gemini-3-flash | `gemini-3-flash-preview` | Text | Fast, balanced with thinking (multimodal) |
 | nano-banana | `gemini-2.5-flash-preview-image-generation` | Image | Fast image generation |
 | nano-banana-pro | `gemini-2.0-flash-exp-image-generation` | Image | High-fidelity images |
-| deep-research | `deep-research-pro-preview-12-2025` | Research | Autonomous web research agent |
+| deep-research | `deep-research-preview-04-2026` | Research | Fast autonomous research agent (interactive) |
+| deep-research-max | `deep-research-max-preview-04-2026` | Research | Comprehensive research agent with inline charts, MCP tools, and collaborative planning |
 
 **Note:** Uses `@google/genai` SDK (not the deprecated `@google/generative-ai`).
 
