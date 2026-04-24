@@ -312,7 +312,8 @@ const TOOLS = [
         output_dir: {
           type: "string",
           description:
-            "Directory to save inline-generated charts/infographics. If omitted, images are discarded.",
+            "Optional directory to persist any inline-generated charts/infographics to disk. " +
+            "Images are always returned as inline content regardless; this just adds a disk copy.",
         },
         timeout_minutes: {
           type: "number",
@@ -340,7 +341,8 @@ const TOOLS = [
         output_dir: {
           type: "string",
           description:
-            "Directory to save any inline-generated images if the task has now completed.",
+            "Optional directory to persist any inline-generated images to disk. Images are " +
+            "always returned as inline content regardless.",
         },
       },
       required: ["interaction_id"],
@@ -707,15 +709,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           ? `**Research plan awaiting your review.** Call deep_research again with your refinements as 'query' and previous_interaction_id='${result.interactionId}' to continue.\n\n${result.plan}`
           : result.text;
 
+      const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+        { type: "text", text: bodyText },
+      ];
+      for (const img of result.images ?? []) {
+        content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+      }
+
       return {
-        content: [{ type: "text", text: bodyText }],
+        content,
         _meta: {
           model: result.model,
           interactionId: result.interactionId,
           status: result.status,
           durationMs: result.durationMs,
           durationMinutes: Math.round((result.durationMs / 1000 / 60) * 10) / 10,
-          images: result.images,
+          // Only include image paths/types in meta — base64 already surfaced as content blocks.
+          images: result.images?.map((img) => ({ path: img.path, mimeType: img.mimeType })),
           plan: result.plan,
         },
       };
@@ -755,15 +765,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
 
       const result = await deepResearchProvider.checkResearch(interactionId, outputDir);
 
+      const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+        { type: "text", text: result.text },
+      ];
+      for (const img of result.images ?? []) {
+        content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+      }
+
       // Return result (could be completed, in_progress, requires_action, or failed)
       return {
-        content: [{ type: "text", text: result.text }],
+        content,
         _meta: {
           model: result.model,
           interactionId: result.interactionId,
           status: result.status,
           durationMs: result.durationMs,
-          images: result.images,
+          images: result.images?.map((img) => ({ path: img.path, mimeType: img.mimeType })),
           plan: result.plan,
         },
       };

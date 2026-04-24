@@ -447,25 +447,28 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
 
     if (candidates.length === 0) return undefined;
 
-    if (!outputDir) {
-      throw new Error(
-        `API_ERROR: Research returned ${candidates.length} inline image(s) but no output_dir was set. ` +
-          `Pass output_dir to save them, or set visualization: "off" to suppress image output.`
-      );
-    }
-
-    if (!existsSync(outputDir)) {
-      mkdirSync(outputDir, { recursive: true });
+    // Always include base64 data so callers can embed inline. Persist to disk
+    // only when outputDir is explicitly provided.
+    let persist = false;
+    if (outputDir) {
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      persist = true;
     }
 
     const images: ResearchImage[] = [];
     for (let i = 0; i < candidates.length; i++) {
       const { data, mimeType } = candidates[i];
-      const ext = mimeType.split("/")[1]?.split("+")[0] || "png";
-      const path = join(outputDir, `${interactionId}-${i + 1}.${ext}`);
-      writeFileSync(path, Buffer.from(data, "base64"));
-      images.push({ path, mimeType });
-      logger.debugLog("Saved research image", { path, mimeType });
+      const img: ResearchImage = { data, mimeType };
+      if (persist) {
+        const ext = mimeType.split("/")[1]?.split("+")[0] || "png";
+        const path = join(outputDir!, `${interactionId}-${i + 1}.${ext}`);
+        writeFileSync(path, Buffer.from(data, "base64"));
+        img.path = path;
+        logger.debugLog("Saved research image", { path, mimeType });
+      }
+      images.push(img);
     }
 
     return images;

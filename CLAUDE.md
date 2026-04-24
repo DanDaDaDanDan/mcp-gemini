@@ -243,6 +243,15 @@ tool-result content types (`google_search_call`, `file_search_result`, etc.)
 are skipped during image extraction. Any unrecognized output type fails hard
 with the JSON dumped into the error message — we don't silently drop data.
 
+**Image handling:** Deep Research with `visualization: "auto"` (the default)
+generates infographics even for queries that didn't explicitly ask for charts
+— a simple 3-paragraph text request can still return 1+ images. Our MCP
+surfaces every image as an inline `{ type: "image", data, mimeType }` content
+block in the tool response regardless of whether `output_dir` is set. When
+`output_dir` is provided, images are additionally persisted to disk and their
+paths appear in `_meta.images[].path`. Base64 data is stripped from `_meta`
+to avoid bloating metadata.
+
 **Other notes:**
 - Long-running: typically 5-30 min for `deep-research`, up to 60 min for max
 - `disable_web` in our MCP strips `google_search` + `url_context` for
@@ -290,7 +299,7 @@ with the JSON dumped into the error message — we don't silently drop data.
   mcp_servers?: Array<{ name: string; url: string; headers?: Record<string, string> }>;
   attachments?: Attachment[];                // PDFs, CSVs, images, audio, video, text
   previous_interaction_id?: string;          // Continue after plan review / prior run
-  output_dir?: string;                       // Save inline-generated images here
+  output_dir?: string;                       // Optional: also persist generated images to disk
   timeout_minutes?: number;                  // Default: 120
 }
 ```

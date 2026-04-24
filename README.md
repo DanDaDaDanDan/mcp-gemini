@@ -122,7 +122,7 @@ Autonomous research agent (Gemini 3.1 Pro) that searches the web, analyzes sourc
 | `mcp_servers` | object[] | | Remote MCP servers (`{name, url, headers?}`) the agent may call as tools |
 | `attachments` | object[] | | Multimodal inputs (PDFs, CSVs, images, audio, video, text) |
 | `previous_interaction_id` | string | | Continue a prior interaction (e.g., after plan review) |
-| `output_dir` | string | | Directory to save inline-generated charts/infographics |
+| `output_dir` | string | | Optional disk directory for generated charts/infographics (images are always returned as inline content blocks regardless) |
 | `timeout_minutes` | number | | Max wait time (default: 120, max: 120) |
 
 **Note:** Long-running — typically 5-30 minutes for `deep-research`, up to 60 minutes for `deep-research-max`. If it times out, use `check_research` with the returned `interactionId` to retrieve results.

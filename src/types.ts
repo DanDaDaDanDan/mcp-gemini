@@ -98,10 +98,13 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
 }
 
-// Generated image returned alongside a research report (infographic/chart)
+// Generated image returned alongside a research report (infographic/chart).
+// `data` is always populated (base64) so callers can embed inline; `path` is
+// set only when the provider wrote the image to `outputDir`.
 export interface ResearchImage {
-  path: string;
+  data: string;
   mimeType: string;
+  path?: string;
 }
 
 // Deep Research options

@@ -32,4 +32,6 @@ test-shapes.mjs
 test-shapes2.mjs
 test-shapes3.mjs
 test-provider.mjs
+test-e2e.mjs
+test-e2e-retry.mjs
 test-output/
