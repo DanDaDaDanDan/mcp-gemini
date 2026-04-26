@@ -113,7 +113,7 @@ Autonomous research agent (Gemini 3.1 Pro) that searches the web, analyzes sourc
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Research question or refinement when continuing a plan |
 | `model` | string | | `deep-research-max` (default, comprehensive) or `deep-research` (fast) |
-| `visualization` | string | | `auto` (default) or `off` — inline charts/infographics |
+| `visualization` | string | | `off` (default — text only) or `auto` (inline charts/infographics) |
 | `thinking_summaries` | string | | `auto` (default) or `none` |
 | `collaborative_planning` | boolean | | Pause after proposing a plan; continue with `previous_interaction_id` |
 | `tools` | string[] | | Subset of `google_search`, `url_context`, `code_execution`, `file_search` |

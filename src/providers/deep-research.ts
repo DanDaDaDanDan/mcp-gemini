@@ -82,7 +82,7 @@ export class GeminiDeepResearchProvider implements DeepResearchProvider {
     const {
       query,
       model = DEFAULT_RESEARCH_MODEL,
-      visualization = "auto",
+      visualization = "off",
       thinkingSummaries = "auto",
       collaborativePlanning = false,
       tools = ["google_search", "url_context"],

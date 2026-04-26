@@ -228,8 +228,10 @@ const TOOLS = [
           type: "string",
           enum: ["auto", "off"],
           description:
-            "Whether to generate inline charts and infographics (HTML + images). Default: auto.",
-          default: "auto",
+            "Whether the agent may generate inline charts/infographics. Default: 'off' " +
+            "(text-only reports). Set to 'auto' to allow images — they're returned as inline " +
+            "MCP image content blocks alongside the text.",
+          default: "off",
         },
         thinking_summaries: {
           type: "string",
@@ -679,7 +681,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         model: model || "deep-research-max",
         queryLength: query.length,
         timeoutMinutes: timeoutMinutes || 120,
-        visualization: visualization || "auto",
+        visualization: visualization || "off",
         collaborativePlanning: !!collaborativePlanning,
         toolCount: tools?.length,
         attachmentCount: attachments?.length,

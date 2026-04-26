@@ -190,7 +190,7 @@ const interaction = await client.interactions.create({
   agent_config: {
     type: "deep-research",                     // required
     thinking_summaries: "auto",                // "auto" | "none"
-    visualization: "auto",                     // "auto" | "off"
+    visualization: "off",                      // "auto" | "off" — auto generates charts
     collaborative_planning: false,             // propose plan before execution
   },
   // Each tool is a discriminated union: { type: "<name>", ...config }.
@@ -243,11 +243,11 @@ tool-result content types (`google_search_call`, `file_search_result`, etc.)
 are skipped during image extraction. Any unrecognized output type fails hard
 with the JSON dumped into the error message — we don't silently drop data.
 
-**Image handling:** Deep Research with `visualization: "auto"` (the default)
-generates infographics even for queries that didn't explicitly ask for charts
-— a simple 3-paragraph text request can still return 1+ images. Our MCP
-surfaces every image as an inline `{ type: "image", data, mimeType }` content
-block in the tool response regardless of whether `output_dir` is set. When
+**Image handling:** Visualization defaults to `"off"` (text-only reports).
+When opted into via `visualization: "auto"`, Deep Research aggressively
+generates infographics — a simple 3-paragraph text request can still return
+1+ images. Our MCP surfaces every image as an inline
+`{ type: "image", data, mimeType }` content block in the tool response. When
 `output_dir` is provided, images are additionally persisted to disk and their
 paths appear in `_meta.images[].path`. Base64 data is stripped from `_meta`
 to avoid bloating metadata.
@@ -289,7 +289,7 @@ to avoid bloating metadata.
 {
   query: string;                             // Required
   model?: "deep-research-max" | "deep-research";  // Default: deep-research-max
-  visualization?: "auto" | "off";            // Default: auto — inline charts/infographics
+  visualization?: "auto" | "off";            // Default: off. Set to "auto" for inline charts.
   thinking_summaries?: "auto" | "none";      // Default: auto
   collaborative_planning?: boolean;          // Default: false — pause for plan review
   tools?: Array<"google_search" | "url_context" | "code_execution" | "file_search">;
