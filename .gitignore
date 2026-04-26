@@ -34,4 +34,5 @@ test-shapes3.mjs
 test-provider.mjs
 test-e2e.mjs
 test-e2e-retry.mjs
+test-e2e-full.mjs
 test-output/
